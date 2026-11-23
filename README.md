@@ -1,24 +1,36 @@
 # rod-pack-minter
 
-Solana program (Anchor 1.2.2) that sells Reign of Desire card packs. One `buy_pack` transaction takes the $BOOTY price
-and mints the whole pack as Bubblegum v1 cNFTs into the expansion's Token Metadata collection. If any step fails,
-nothing happens. Cards are drawn on chain when the transaction runs. Only the admin can choose a card (`admin_mint`).
+Solana program (Anchor 1.2.2) that sells Reign of Desire card packs as Bubblegum v1 cNFTs in the expansion's Token
+Metadata collection. A purchase has two steps:
 
-Plan and decisions: `ci-cardgame/docs/plans/2026-11-22-first-crush-expansion.md`.
+1. `buy_pack` (player + backend approver): the $BOOTY price moves into the program's vault and a PendingPack records
+   the purchase slot. Tree room is reserved and the draw inputs (weights, card counts) are frozen.
+2. `open_pack` (anyone, normally the backend a moment later): the cards are drawn from the hash of the purchase slot,
+   which only exists once the purchase is irreversible, then minted to the player. The price goes to the shop.
+
+Nobody (player, backend, opener or admin) can choose or re-roll a paid pack's cards. Only `admin_mint` (admin-signed)
+picks a card. The player pays every fee: `buy_pack` takes a deposit that the program pays to whoever opens the pack.
+A pack that cannot be opened (its slot hash left SlotHashes during an outage) can only be refunded by the admin.
+
+Plan and decisions: `ci-cardgame/docs/plans/2026-11-22-first-crush-expansion.md`. Security notes: `docs/security.md`.
 
 ## Instructions
 
 | Instruction | Signer | What it does |
 |---|---|---|
-| `initialize` | program upgrade authority | Creates the config (paused), sets the approver, tree funder, $BOOTY mint and destination, tree size |
-| `set_paused`, `set_approver`, `set_tree_funder`, `set_tree_size`, `set_payment`, `propose_admin` / `accept_admin` | admin | Global settings |
-| `add_expansion`, `update_expansion`, `set_price`, `set_expansion_paused`, `upsert_cards` | admin | Expansions (First Crush = 1); one discount period at a time |
+| `initialize` | program upgrade authority | Config (paused), vault, approver, tree funder, $BOOTY mint and destination, tree size, fees |
+| `migrate_config`, `init_vault` | admin | One-off upgrade of a v1 config (devnet) |
+| `set_paused`, `set_approver`, `set_tree_funder`, `set_tree_size`, `set_fees`, `set_payment`, `set_destination`, `propose_admin` / `accept_admin` | admin | Global settings |
+| `add_expansion`, `update_expansion`, `set_price`, `set_expansion_paused`, `upsert_cards` | admin | Expansions; one discount period at a time; cards are appended or renamed, never removed or re-rarified |
 | `create_tree` | admin or tree funder | Initialises a pre-allocated tree with the program's PDA as creator and delegate; becomes active or standby |
 | `rotate_tree` | anyone | Promotes the standby tree once the active tree has fewer than 10 free leaves |
-| `buy_pack(expansion_id, order_id, max_price)` | player + approver | Pays and mints `pack_size` drawn cards; must be top-level and followed only by compute-budget (or harmless Lighthouse) instructions |
+| `buy_pack(expansion_id, order_id, max_price)` | player + approver | Step 1: price to the vault, PendingPack, fee deposit |
+| `open_pack` | anyone | Step 2: seal, draw, mint, price to the shop, deposit to the opener, rent back to the player |
+| `seal_pack` | anyone | Stores the purchase slot's hash early (when opening must wait); paid from the deposit |
+| `refund_pack` | admin | Price back to the player for a pack that cannot be opened (after `refund_after_secs`) |
 | `admin_mint(expansion_id, card_id, count)` | admin | Mints a chosen card to any wallet, no payment |
 
-Pause (global or per expansion) stops both `buy_pack` and `admin_mint`.
+Pause (global or per expansion) stops `buy_pack` and `admin_mint`; already paid packs can still be opened.
 
 ## Build and test on Windows (native, no WSL)
 
@@ -32,9 +44,9 @@ anchor build                     # target\deploy\rod_pack_minter.so + target\idl
 cargo test -p rod-pack-minter -- --nocapture
 ```
 
-The tests run in LiteSVM with the real Metaplex programs. Measured: 6-card pack ~445k CU, 10-card pack ~675k CU,
-`admin_mint` of 3 cards ~246k CU (callers must set a compute limit), v0 transaction with `rotate_tree` + `buy_pack`
-482 bytes with a lookup table.
+The tests (32) run in LiteSVM with the real Metaplex programs. Measured: `buy_pack` ~30-46k CU, `open_pack` of 6 cards
+~400-440k CU, 10 cards ~650-770k CU (also with a full 400-card table), `admin_mint` of 3 cards ~200k CU (callers must set
+a compute limit). With a lookup table: `buy_pack` 444-476 bytes, `rotate_tree` + `open_pack` 361-377 bytes.
 
 `idl/rod_pack_minter.json` is the committed copy of the IDL for the backend and admin site; refresh it after changes.
 

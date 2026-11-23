@@ -535,6 +535,9 @@ impl Env {
     }
 
     pub fn buy_ix(&self, id: u16, order_id: [u8; 16], max_price: u64, approver: &Pubkey) -> Instruction {
+        let c = self.config();
+        let active_tc = bubblegum::tree_config_address(&c.active_tree);
+        let standby_tc = if c.standby_tree == Pubkey::default() { active_tc } else { bubblegum::tree_config_address(&c.standby_tree) };
         Instruction::new_with_bytes(
             rod_pack_minter::ID,
             &rod_pack_minter::instruction::BuyPack { expansion_id: id, order_id, max_price }.data(),
@@ -549,6 +552,8 @@ impl Env {
                 vault: vault_pda(&self.booty_mint),
                 booty_mint: self.booty_mint,
                 token_program: TOKEN_PROGRAM,
+                active_tree_config: active_tc,
+                standby_tree_config: standby_tc,
                 system_program: system_program::ID,
                 event_authority: event_authority_pda(),
                 program: rod_pack_minter::ID,
@@ -629,14 +634,16 @@ impl Env {
         )
     }
 
-    pub fn refund_ix(&self, order_id: &[u8; 16]) -> Instruction {
+    /// The admin's refund of a pack of the test player.
+    pub fn refund_ix(&self, signer: &Pubkey, order_id: &[u8; 16]) -> Instruction {
         Instruction::new_with_bytes(
             rod_pack_minter::ID,
             &rod_pack_minter::instruction::RefundPack {}.data(),
             rod_pack_minter::accounts::RefundPack {
-                player: self.player.pubkey(),
+                admin: *signer,
                 config: config_pda(),
                 pending_pack: pending_pda(&self.player.pubkey(), order_id),
+                player: self.player.pubkey(),
                 vault: vault_pda(&self.booty_mint),
                 player_token: self.player_token,
                 booty_mint: self.booty_mint,

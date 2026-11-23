@@ -1,31 +1,38 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked};
 
+use crate::instructions::seal::pay_from_pending;
 use crate::{
     constants::*,
     error::ErrorCode,
     state::{Config, PackRefunded, PendingPack},
 };
 
-/// The player takes back the price of a pack that nobody opened within `refund_after_secs` (a long outage). The
-/// PendingPack is closed: its rent and any unused fee deposit go back to the player too.
+/// The admin returns the price of a pack that could not be opened (for example its hash left SlotHashes during an
+/// outage). Admin-only on purpose: the cards of any paid pack are public from the slot after purchase, so a refund
+/// the player could trigger would let them keep good packs and return bad ones. The price goes to the player's own
+/// $BOOTY account, the PendingPack rent back to the player, and the player's fee deposit to the admin (who sent the
+/// transaction), so the player still pays every fee.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct RefundPack<'info> {
     #[account(mut)]
-    pub player: Signer<'info>,
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    pub admin: Signer<'info>,
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ ErrorCode::Unauthorized)]
     pub config: Box<Account<'info, Config>>,
     #[account(
-        mut, close = player, has_one = player @ ErrorCode::WrongPlayer,
-        seeds = [PACK_SEED, player.key().as_ref(), pending_pack.order_id.as_ref()],
+        mut, close = player,
+        seeds = [PACK_SEED, pending_pack.player.as_ref(), pending_pack.order_id.as_ref()],
         bump = pending_pack.bump
     )]
     pub pending_pack: Box<Account<'info, PendingPack>>,
+    /// CHECK: must be the pack's player; receives the PendingPack rent.
+    #[account(mut, address = pending_pack.player @ ErrorCode::WrongPlayer)]
+    pub player: UncheckedAccount<'info>,
     #[account(mut, address = config.vault @ ErrorCode::WrongVault)]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    /// The player's $BOOTY account (any account of the mint the player chooses).
-    #[account(mut)]
+    /// A $BOOTY account owned by the player.
+    #[account(mut, token::mint = booty_mint, token::authority = player)]
     pub player_token: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(address = config.booty_mint @ ErrorCode::WrongPaymentAccount)]
     pub booty_mint: Box<InterfaceAccount<'info, Mint>>,
@@ -33,6 +40,7 @@ pub struct RefundPack<'info> {
 }
 
 pub fn handle_refund_pack(ctx: Context<RefundPack>) -> Result<()> {
+    require_keys_neq!(ctx.accounts.player_token.key(), ctx.accounts.vault.key(), ErrorCode::VaultNotAllowed);
     let now = Clock::get()?.unix_timestamp;
     let pending = &ctx.accounts.pending_pack;
     let config = &ctx.accounts.config;
@@ -57,10 +65,13 @@ pub fn handle_refund_pack(ctx: Context<RefundPack>) -> Result<()> {
             ctx.accounts.booty_mint.decimals,
         )?;
     }
-    let (expansion_id, order_id) = (pending.expansion_id, pending.order_id);
+    let (expansion_id, order_id, player, pack_size) = (pending.expansion_id, pending.order_id, pending.player, pending.pack_size);
+    let fees = pending.open_fee.checked_add(pending.seal_fee).ok_or(ErrorCode::Overflow)?;
+    pay_from_pending(&ctx.accounts.pending_pack.to_account_info(), &ctx.accounts.admin.to_account_info(), fees)?;
     let config = &mut ctx.accounts.config;
     config.pending_packs = config.pending_packs.checked_sub(1).ok_or(ErrorCode::Overflow)?;
+    config.reserved_leaves = config.reserved_leaves.saturating_sub(pack_size as u64);
     config.packs_refunded = config.packs_refunded.checked_add(1).ok_or(ErrorCode::Overflow)?;
-    emit_cpi!(PackRefunded { expansion_id, order_id, player: ctx.accounts.player.key(), price });
+    emit_cpi!(PackRefunded { expansion_id, order_id, player, price });
     Ok(())
 }

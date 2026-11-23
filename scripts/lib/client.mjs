@@ -76,6 +76,8 @@ export const configPda = () => pda([Buffer.from('config')]);
 export const expansionPda = (id) => pda([Buffer.from('expansion'), u16le(id)]);
 export const cardsPda = (id) => pda([Buffer.from('cards'), u16le(id)]);
 export const mintAuthorityPda = () => pda([Buffer.from('mint_authority')]);
+export const vaultPda = (mint) => pda([Buffer.from('vault'), new PublicKey(mint).toBuffer()]);
+export const pendingPda = (player, orderId) => pda([Buffer.from('pack'), new PublicKey(player).toBuffer(), Buffer.from(orderId)]);
 export const eventAuthorityPda = () => pda([Buffer.from('__event_authority')]);
 export const programDataPda = () => pda([PROGRAM_ID.toBuffer()], BPF_UPGRADEABLE_ID);
 export const treeConfigPda = (tree) => pda([new PublicKey(tree).toBuffer()], BUBBLEGUM_ID);
@@ -126,7 +128,16 @@ export function decodeConfig(data) {
         admin: r.key(), pendingAdmin: r.key(), approver: r.key(), treeFunder: r.key(), paused: r.bool(),
         bootyMint: r.key(), bootyDestination: r.key(), activeTree: r.key(), standbyTree: r.key(),
         treeMaxDepth: r.u32(), treeMaxBuffer: r.u32(), treeCanopyDepth: r.u32(), treesCreated: r.u32(),
-        nextExpansionId: r.u16(), packsSold: r.u64(), cardsMinted: r.u64(),
+        nextExpansionId: r.u16(), packsSold: r.u64(), cardsMinted: r.u64(), bump: r.u8(), mintAuthorityBump: r.u8(),
+        ...(data.length > 301 ? { vault: r.key(), openFee: r.u64(), sealFee: r.u64(), refundAfterSecs: r.i64(), pendingPacks: r.u64(), packsRefunded: r.u64() } : { v1: true }),
+    };
+}
+
+export function decodePendingPack(data) {
+    const r = new Reader(data);
+    return {
+        player: r.key(), expansionId: r.u16(), orderId: Buffer.from(r.b.subarray(r.o, (r.o += 16))), price: r.u64(), packSize: r.u8(),
+        purchaseSlot: r.u64(), purchasedAt: r.i64(), sealed: r.bool(), slotHash: Buffer.from(r.b.subarray(r.o, (r.o += 32))), openFee: r.u64(), sealFee: r.u64(),
     };
 }
 
@@ -141,13 +152,21 @@ export function decodeExpansion(data) {
     };
 }
 
+// Header (disc 8 | expansion_id u16 | bump u8 | count u16), then fixed 107-byte entries:
+// rarity u8 | name_len u8 | name [32] | suffix_len u8 | uri_suffix [72].
+export const CARD_HEADER_LEN = 13;
+export const CARD_ENTRY_LEN = 107;
 export function decodeCardTable(data) {
-    const r = new Reader(data);
-    const expansionId = r.u16(); r.u8();
-    const n = r.u32();
+    const expansionId = data.readUInt16LE(8);
+    const count = data.readUInt16LE(11);
     const cards = [];
-    for (let i = 0; i < n; i++) cards.push({ rarity: r.u8(), name: r.str(), uriSuffix: r.str() });
-    return { expansionId, cards };
+    for (let i = 0; i < count; i++) {
+        const o = CARD_HEADER_LEN + i * CARD_ENTRY_LEN;
+        if (o + CARD_ENTRY_LEN > data.length) break; // an old-layout table (devnet before the upgrade)
+        const e = data.subarray(o, o + CARD_ENTRY_LEN);
+        cards.push({ rarity: e[0], name: e.subarray(2, 2 + e[1]).toString('utf8'), uriSuffix: e.subarray(35, 35 + e[34]).toString('utf8') });
+    }
+    return { expansionId, count, cards };
 }
 
 export function treeConfigInfo(data) {

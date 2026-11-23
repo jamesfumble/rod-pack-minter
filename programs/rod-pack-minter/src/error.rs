@@ -14,12 +14,6 @@ pub enum ErrorCode {
     OutsideSalePeriod,
     #[msg("The pack price is higher than the price the buyer accepted")]
     PriceAboveMax,
-    #[msg("buy_pack must be a top-level instruction")]
-    NotTopLevel,
-    #[msg("Only compute-budget or Lighthouse instructions may follow buy_pack")]
-    ForbiddenFollowingInstruction,
-    #[msg("A Lighthouse instruction may not reference the pack accounts")]
-    ForbiddenLighthouseAccount,
     #[msg("Wrong approver")]
     WrongApprover,
     #[msg("This is not the active tree")]
@@ -44,7 +38,7 @@ pub enum ErrorCode {
     WrongPaymentAccount,
     #[msg("Pack size must be 1 to 10")]
     BadPackSize,
-    #[msg("Weights must sum to more than 0, and only rarities that have cards may have weight")]
+    #[msg("No card can be drawn with these weights: weighted rarities have no cards")]
     BadWeights,
     #[msg("Royalty must be at most 10000 bps")]
     BadRoyalty,
@@ -72,7 +66,7 @@ pub enum ErrorCode {
     TooEarlyToOpen,
     #[msg("The pack is already sealed")]
     AlreadySealed,
-    #[msg("The purchase slot's hash is no longer in SlotHashes; use the fallback (open after expiry)")]
+    #[msg("The purchase slot's hash is no longer in SlotHashes; the pack can only be refunded by the admin")]
     SlotHashUnavailable,
     #[msg("The refund period has not started")]
     TooEarlyToRefund,
@@ -92,4 +86,8 @@ pub enum ErrorCode {
     CollectionLocked,
     #[msg("A discount needs a price above 0")]
     ZeroDiscount,
+    #[msg("A card's rarity cannot change once it is in the table")]
+    RarityLocked,
+    #[msg("The vault cannot be the destination or the refund account")]
+    VaultNotAllowed,
 }

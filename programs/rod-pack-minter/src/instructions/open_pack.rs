@@ -7,7 +7,7 @@ use crate::{
     constants::*,
     draw::{draw_pack, pack_seed},
     error::ErrorCode,
-    state::{nth_of_rarity, rarity_counts, CardTable, Config, Expansion, PackMinted, PackSealed, PendingPack},
+    state::{nth_of_rarity, CardTable, Config, Expansion, PackMinted, PackSealed, PendingPack},
 };
 
 /// Step 2 of a purchase. Anyone may send it (normally the backend, right after the purchase; the game client as a
@@ -52,8 +52,8 @@ pub struct OpenPack<'info> {
 pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
     let pending_key = ctx.accounts.pending_pack.key();
     if !ctx.accounts.pending_pack.sealed {
-        let fallback = seal(&mut ctx.accounts.pending_pack, &pending_key, &ctx.accounts.slot_hashes.to_account_info())?;
-        emit_cpi!(PackSealed { pending_pack: pending_key, fallback, slot_hash: ctx.accounts.pending_pack.slot_hash });
+        seal(&mut ctx.accounts.pending_pack, &ctx.accounts.slot_hashes.to_account_info())?;
+        emit_cpi!(PackSealed { pending_pack: pending_key, slot_hash: ctx.accounts.pending_pack.slot_hash });
     }
 
     let pending = &ctx.accounts.pending_pack;
@@ -68,8 +68,8 @@ pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
     {
         let info = table.to_account_info();
         let data = info.try_borrow_data()?;
-        let counts = rarity_counts(&data, table.count);
-        let picks = draw_pack(&seed, pack_size, &expansion.weights_regular, &expansion.weights_guaranteed, &counts).ok_or(ErrorCode::BadWeights)?;
+        // Frozen at purchase: later edits to the expansion do not change a paid pack.
+        let picks = draw_pack(&seed, pack_size, &pending.weights_regular, &pending.weights_guaranteed, &pending.rarity_counts).ok_or(ErrorCode::BadWeights)?;
         for (rarity, index) in picks {
             card_ids.push(nth_of_rarity(&data, table.count, rarity, index).ok_or(ErrorCode::BadCardId)?);
         }
@@ -109,6 +109,7 @@ pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
     let n = card_ids.len() as u64;
     let config = &mut ctx.accounts.config;
     config.pending_packs = config.pending_packs.checked_sub(1).ok_or(ErrorCode::Overflow)?;
+    config.reserved_leaves = config.reserved_leaves.saturating_sub(pack_size as u64);
     config.packs_sold = config.packs_sold.checked_add(1).ok_or(ErrorCode::Overflow)?;
     config.cards_minted = config.cards_minted.checked_add(n).ok_or(ErrorCode::Overflow)?;
     let expansion = &mut ctx.accounts.expansion;

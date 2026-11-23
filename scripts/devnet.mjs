@@ -2,8 +2,9 @@
 // %USERPROFILE%\.config\rod-pack-minter\devnet\ (outside every repo) and are never printed. Public addresses of what
 // this creates are written to deployments/devnet.json.
 //
-//   node scripts/devnet.mjs keys | fund | booty | collection | deploy <program-keypair-path> | init | expansion
-//                           tree [admin|funder] | unpause | buy | admin-mint <cardId> <count> [recipient] | status
+//   node scripts/devnet.mjs keys | fund | booty | collection | deploy <program-keypair-path> | upgrade | init | migrate
+//                           expansion | tree [admin|funder] | unpause | buy | buy-only | open <order-hex> | seal <order-hex>
+//                           refund <order-hex> | admin-mint <cardId> <count> [recipient] | status
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -29,11 +30,14 @@ const CARD_LIST = process.env.CARD_LIST || 'C:/Projects/first-crush-nft-collecti
 const SOLANA = process.env.SOLANA_BIN || join(homedir(), '.local', 'share', 'solana', 'install', 'active_release', 'bin', process.platform === 'win32' ? 'solana.exe' : 'solana');
 const BOOTY = 1_000_000_000n; // 9 decimals
 const TREE = { depth: 14, buffer: 64, canopy: 8 };
+// The player's per-purchase deposit for the opener (and sealer), and the refund delay.
+const FEES = { open: 20_000n, seal: 5_000n, refundAfterSecs: 86_400n };
+const SLOT_HASHES = 'SysvarS1otHashes111111111111111111111111111';
 const ROYALTY_CREATOR = 'GSqgkoPSWXgyovHvpqZgdW7SQ6P23dMH5dweWMNMLbGD';
 
 const conn = new Connection(RPC, 'confirmed');
 const key = (name) => Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(join(KEYS, name + '.json'), 'utf8'))));
-const K = () => ({ admin: key('admin'), approver: key('approver'), funder: key('tree-funder'), owner: key('collection-owner'), player: key('player') });
+const K = () => ({ admin: key('admin'), approver: key('approver'), funder: key('tree-funder'), owner: key('collection-owner'), player: key('player'), opener: key('opener') });
 const state = () => (existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {});
 const save = (patch) => {
     mkdirSync(join(ROOT, 'deployments'), { recursive: true });
@@ -45,6 +49,10 @@ const sol = async (pk) => (await conn.getBalance(new PublicKey(pk))) / LAMPORTS_
 const send = (ixs, payer, ...signers) => sendAndConfirmTransaction(conn, new Transaction().add(...ixs), [payer, ...signers], { commitment: 'confirmed' });
 const explorer = (sig) => NETWORK === 'devnet' ? `https://explorer.solana.com/tx/${sig}?cluster=devnet` : sig;
 
+/** The First Crush expansion id (1 at first; a later id on devnet after the card-table format change). */
+const fcId = () => state().expansions?.first_crush?.id ?? 1;
+const isLegacyTable = (data) => data.length !== c.CARD_HEADER_LEN + data.readUInt16LE(11) * c.CARD_ENTRY_LEN;
+
 const commands = {
     async keys() {
         for (const [n, k] of Object.entries(K())) console.log(n.padEnd(8), k.publicKey.toBase58(), (await sol(k.publicKey)).toFixed(4), 'SOL');
@@ -53,7 +61,7 @@ const commands = {
     // Spread SOL from the admin to the other test keys.
     async fund() {
         const k = K();
-        const want = { funder: 0.4, owner: 0.05, approver: 0.01, player: 0.05 };
+        const want = { funder: 0.4, owner: 0.05, approver: 0.01, player: 0.05, opener: 0.02 };
         const ixs = [];
         for (const [n, amount] of Object.entries(want)) {
             const have = await sol(k[n].publicKey);
@@ -142,20 +150,66 @@ const commands = {
         save({ deployedAt: new Date().toISOString() });
     },
 
+    // Upgrade the deployed program to target/deploy/rod_pack_minter.so (signed by the devnet admin = upgrade authority).
+    async upgrade() {
+        const so = join(ROOT, 'target', 'deploy', 'rod_pack_minter.so');
+        const adminPath = join(KEYS, 'admin.json');
+        execFileSync(SOLANA, ['program', 'deploy', so, '--program-id', c.PROGRAM_ID.toBase58(), '--upgrade-authority', adminPath,
+            '--keypair', adminPath, '--url', RPC, '--with-compute-unit-price', '10000', '--max-sign-attempts', '30'], { stdio: 'inherit' });
+        save({ upgradedAt: new Date().toISOString() });
+    },
+
+    // One-off after the two-step upgrade: extend the v1 config, create the vault, register it.
+    async migrate() {
+        const k = K(); const s = state();
+        let cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
+        if (cfg.v1) {
+            const i = c.ix('migrate_config', { open_fee_lamports: FEES.open, seal_fee_lamports: FEES.seal, refund_after_secs: FEES.refundAfterSecs },
+                { admin: k.admin.publicKey, config: c.configPda(), system_program: SystemProgram.programId });
+            console.log('migrate_config', explorer(await send([i], k.admin)));
+        }
+        const vault = c.vaultPda(s.bootyMint);
+        if (!(await conn.getAccountInfo(vault))) {
+            const i = c.ix('init_vault', {}, { admin: k.admin.publicKey, config: c.configPda(), booty_mint: s.bootyMint, vault, token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId });
+            console.log('init_vault', explorer(await send([i], k.admin)));
+        }
+        cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
+        if (!cfg.vault.equals(vault)) {
+            const i = c.ix('set_payment', {}, { admin: k.admin.publicKey, config: c.configPda(), booty_mint: s.bootyMint, booty_destination: s.bootyDestination, vault });
+            console.log('set_payment', explorer(await send([i], k.admin)));
+        }
+        save({ vault: vault.toBase58() });
+        await commands.status();
+    },
+
     async init() {
         const k = K(); const s = state();
         if (await conn.getAccountInfo(c.configPda())) return console.log('already initialised');
-        const i = c.ix('initialize', { approver: k.approver.publicKey, tree_funder: k.funder.publicKey, tree_max_depth: TREE.depth, tree_max_buffer: TREE.buffer, tree_canopy_depth: TREE.canopy }, {
+        const params = { approver: k.approver.publicKey, tree_funder: k.funder.publicKey, tree_max_depth: TREE.depth, tree_max_buffer: TREE.buffer, tree_canopy_depth: TREE.canopy,
+            open_fee_lamports: FEES.open, seal_fee_lamports: FEES.seal, refund_after_secs: FEES.refundAfterSecs };
+        const i = c.ix('initialize', { params }, {
             admin: k.admin.publicKey, config: c.configPda(), mint_authority: c.mintAuthorityPda(), program: c.PROGRAM_ID, program_data: c.programDataPda(),
-            booty_mint: s.bootyMint, booty_destination: s.bootyDestination, system_program: SystemProgram.programId });
+            booty_mint: s.bootyMint, booty_destination: s.bootyDestination, vault: c.vaultPda(s.bootyMint), token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId });
         console.log('initialize', explorer(await send([i], k.admin)));
-        console.log(save({ config: c.configPda().toBase58(), mintAuthority: c.mintAuthorityPda().toBase58() }));
+        console.log(save({ config: c.configPda().toBase58(), mintAuthority: c.mintAuthorityPda().toBase58(), vault: c.vaultPda(s.bootyMint).toBase58() }));
     },
 
     // First Crush from the card list: rarity Common 0, Rare 1, Epic 2; URI prefix shared, suffix per card.
     async expansion() {
         const k = K(); const s = state();
-        const id = 1;
+        let id = fcId();
+        const existing = await conn.getAccountInfo(c.cardsPda(id));
+        if (existing && isLegacyTable(existing.data)) {
+            // Devnet only: expansion `id` still has the old (Borsh vector) card table. Pause it and start First Crush
+            // again under the next expansion id with a table in the current format, as mainnet will from the start.
+            const e = c.decodeExpansion((await conn.getAccountInfo(c.expansionPda(id))).data);
+            if (!e.paused) {
+                const i = c.ix('set_expansion_paused', { expansion_id: id, paused: true }, { admin: k.admin.publicKey, config: c.configPda(), expansion: c.expansionPda(id) });
+                console.log(`pause legacy expansion ${id}`, explorer(await send([i], k.admin)));
+            }
+            id = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data).nextExpansionId;
+            console.log('First Crush moves to expansion', id);
+        }
         const list = JSON.parse(readFileSync(CARD_LIST, 'utf8'));
         const RARITY = { Common: 0, Rare: 1, Epic: 2 };
         const prefix = 'https://f005.backblazeb2.com/file/cryptoidolz/cards/metadata/';
@@ -171,7 +225,10 @@ const commands = {
             console.log('add_expansion', explorer(await send([i], k.admin)));
         }
         const table = c.decodeCardTable((await conn.getAccountInfo(c.cardsPda(id))).data);
-        for (let start = table.cards.length; start < cards.length; start += 8) {
+        let first = cards.findIndex((x, i) => !table.cards[i] || table.cards[i].name !== x.name || table.cards[i].uriSuffix !== x.uri_suffix || table.cards[i].rarity !== x.rarity);
+        if (first < 0) first = cards.length;
+        first = Math.min(first, table.count);
+        for (let start = first; start < cards.length; start += 8) {
             const chunk = cards.slice(start, start + 8);
             const i = c.ix('upsert_cards', { expansion_id: id, start_index: start, cards: chunk }, { admin: k.admin.publicKey, config: c.configPda(), expansion: c.expansionPda(id), card_table: c.cardsPda(id), system_program: SystemProgram.programId });
             console.log(`upsert_cards ${start}-${start + chunk.length - 1}`, explorer(await send([i], k.admin)));
@@ -184,7 +241,7 @@ const commands = {
             const i = c.ix('set_expansion_paused', { expansion_id: id, paused: false }, { admin: k.admin.publicKey, config: c.configPda(), expansion: c.expansionPda(id) });
             console.log('unpause expansion', explorer(await send([i], k.admin)));
         }
-        save({ expansions: { first_crush: { id, expansion: c.expansionPda(id).toBase58(), cardTable: c.cardsPda(id).toBase58() } } });
+        save({ legacyExpansions: id === 1 ? undefined : [1], expansions: { first_crush: { id, expansion: c.expansionPda(id).toBase58(), cardTable: c.cardsPda(id).toBase58() } } });
     },
 
     async tree(who = 'funder') {
@@ -209,12 +266,42 @@ const commands = {
         console.log('unpause', explorer(await send([i], k.admin)));
     },
 
-    // One pack as the test player, co-signed by the approver: v0 transaction with a lookup table (as the backend will).
-    async buy() {
+    // Step 1: buy_pack as the test player, co-signed by the approver (wallet signs first, approver second).
+    async 'buy-only'() {
         const k = K(); const s = state();
         const cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
-        const id = 1;
-        const orderId = Buffer.alloc(16); Buffer.from('devnet-' + Date.now().toString(36)).copy(orderId);
+        const id = fcId();
+        const orderId = Buffer.alloc(16); Buffer.from('dev-' + Date.now().toString(36)).copy(orderId);
+        const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 }),
+            c.ix('buy_pack', { expansion_id: id, order_id: [...orderId], max_price: 150n * BOOTY }, {
+                player: k.player.publicKey, approver: k.approver.publicKey, config: c.configPda(), expansion: c.expansionPda(id), card_table: c.cardsPda(id),
+                pending_pack: c.pendingPda(k.player.publicKey, orderId), player_token: s.playerBooty, vault: cfg.vault, booty_mint: cfg.bootyMint,
+                token_program: TOKEN_PROGRAM_ID, active_tree_config: c.treeConfigPda(cfg.activeTree),
+                standby_tree_config: c.treeConfigPda(cfg.standbyTree.equals(PublicKey.default) ? cfg.activeTree : cfg.standbyTree),
+                system_program: SystemProgram.programId, ...c.eventAccounts() })];
+        const lut = await ensureLookupTable(k.admin, ixs, [k.player.publicKey, k.approver.publicKey, new PublicKey(s.playerBooty), c.pendingPda(k.player.publicKey, orderId)]);
+        const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
+        const tx = new VersionedTransaction(new TransactionMessage({ payerKey: k.player.publicKey, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message([lut]));
+        tx.sign([k.player]);
+        tx.sign([k.approver]);
+        const sig = await conn.sendTransaction(tx, { maxRetries: 5 });
+        await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+        const tr = await conn.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+        console.log(`buy_pack (${tx.serialize().length} bytes, ${tr.meta.computeUnitsConsumed} CU, slot ${tr.slot})`, explorer(sig));
+        console.log('order', orderId.toString('hex'));
+        return orderId;
+    },
+
+    // Step 2: open_pack, sent by the opener key (the backend's role); anyone could send it.
+    async open(orderHex) {
+        const k = K(); const s = state();
+        const orderId = Buffer.from(orderHex, 'hex');
+        const pendingKey = c.pendingPda(k.player.publicKey, orderId);
+        const info = await conn.getAccountInfo(pendingKey);
+        if (!info) throw new Error('no pending pack ' + pendingKey.toBase58());
+        const pending = c.decodePendingPack(info.data);
+        const cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
+        const exp = c.decodeExpansion((await conn.getAccountInfo(c.expansionPda(pending.expansionId))).data);
         const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 })];
         let tree = cfg.activeTree;
         const tc = c.treeConfigInfo((await conn.getAccountInfo(c.treeConfigPda(tree))).data);
@@ -222,28 +309,53 @@ const commands = {
             ixs.push(c.ix('rotate_tree', {}, { config: c.configPda(), active_tree_config: c.treeConfigPda(tree), ...c.eventAccounts() }));
             tree = cfg.standbyTree;
         }
-        const exp = c.decodeExpansion((await conn.getAccountInfo(c.expansionPda(id))).data);
-        ixs.push(c.ix('buy_pack', { expansion_id: id, order_id: [...orderId], max_price: 150n * BOOTY }, {
-            player: k.player.publicKey, approver: k.approver.publicKey, config: c.configPda(), expansion: c.expansionPda(id), card_table: c.cardsPda(id),
-            player_token: s.playerBooty, booty_destination: cfg.bootyDestination, booty_mint: cfg.bootyMint, token_program: TOKEN_PROGRAM_ID,
-            ...c.mintAccounts(tree, exp.collectionMint), ...c.eventAccounts() }));
-        const lut = await ensureLookupTable(k.admin, ixs, [k.player.publicKey, k.approver.publicKey, new PublicKey(s.playerBooty)]);
+        ixs.push(c.ix('open_pack', {}, {
+            opener: k.opener.publicKey, config: c.configPda(), pending_pack: pendingKey, player: pending.player,
+            expansion: c.expansionPda(pending.expansionId), card_table: c.cardsPda(pending.expansionId), vault: cfg.vault,
+            booty_destination: cfg.bootyDestination, booty_mint: cfg.bootyMint, token_program: TOKEN_PROGRAM_ID,
+            slot_hashes: SLOT_HASHES, ...c.mintAccounts(tree, exp.collectionMint), ...c.eventAccounts() }));
+        const lut = await ensureLookupTable(k.admin, ixs, [k.opener.publicKey, pending.player, pendingKey]);
+        const before = await conn.getBalance(k.opener.publicKey);
         const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
-        const msg = new TransactionMessage({ payerKey: k.player.publicKey, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message([lut]);
-        const tx = new VersionedTransaction(msg);
-        tx.sign([k.player]); // wallet first
-        tx.sign([k.approver]); // then the backend approver, which sends it
-        console.log('transaction size', tx.serialize().length, 'bytes');
+        const tx = new VersionedTransaction(new TransactionMessage({ payerKey: k.opener.publicKey, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message([lut]));
+        tx.sign([k.opener]);
         const sig = await conn.sendTransaction(tx, { maxRetries: 5 });
         await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
-        console.log('buy_pack', explorer(sig));
+        console.log(`open_pack (${tx.serialize().length} bytes)`, explorer(sig));
+        console.log('opener net lamports:', (await conn.getBalance(k.opener.publicKey)) - before);
         await showPack(sig, exp);
+    },
+
+    // Both steps, the way the backend will run them: buy, wait for the purchase slot to complete, open.
+    async buy() {
+        const k = K();
+        const before = await conn.getBalance(k.player.publicKey);
+        const order = await commands['buy-only']();
+        await new Promise((r) => setTimeout(r, 2000));
+        await commands.open(order.toString('hex'));
+        console.log('player net lamports for the pack:', (await conn.getBalance(k.player.publicKey)) - before);
+    },
+
+    async seal(orderHex) {
+        const k = K();
+        const pendingKey = c.pendingPda(k.player.publicKey, Buffer.from(orderHex, 'hex'));
+        const i = c.ix('seal_pack', {}, { sealer: k.opener.publicKey, pending_pack: pendingKey, slot_hashes: SLOT_HASHES, ...c.eventAccounts() });
+        console.log('seal_pack', explorer(await send([i], k.opener)));
+    },
+
+    async refund(orderHex) {
+        const k = K(); const s = state();
+        const cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
+        const pendingKey = c.pendingPda(k.player.publicKey, Buffer.from(orderHex, 'hex'));
+        const i = c.ix('refund_pack', {}, { admin: k.admin.publicKey, player: k.player.publicKey, config: c.configPda(), pending_pack: pendingKey, vault: cfg.vault,
+            player_token: s.playerBooty, booty_mint: cfg.bootyMint, token_program: TOKEN_PROGRAM_ID, ...c.eventAccounts() });
+        console.log('refund_pack (admin)', explorer(await send([i], k.admin)));
     },
 
     async 'admin-mint'(cardId, count = '1', recipient) {
         const k = K();
         const cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
-        const id = 1;
+        const id = fcId();
         const exp = c.decodeExpansion((await conn.getAccountInfo(c.expansionPda(id))).data);
         const i = c.ix('admin_mint', { expansion_id: id, card_id: Number(cardId), count: Number(count) }, {
             admin: k.admin.publicKey, config: c.configPda(), expansion: c.expansionPda(id), card_table: c.cardsPda(id),
@@ -257,7 +369,8 @@ const commands = {
         if (!info) return console.log('not initialised');
         const cfg = c.decodeConfig(info.data);
         console.log({ admin: cfg.admin.toBase58(), approver: cfg.approver.toBase58(), treeFunder: cfg.treeFunder.toBase58(), paused: cfg.paused,
-            activeTree: cfg.activeTree.toBase58(), standbyTree: cfg.standbyTree.toBase58(), treesCreated: cfg.treesCreated, packsSold: cfg.packsSold.toString(), cardsMinted: cfg.cardsMinted.toString() });
+            activeTree: cfg.activeTree.toBase58(), standbyTree: cfg.standbyTree.toBase58(), treesCreated: cfg.treesCreated, packsSold: cfg.packsSold.toString(), cardsMinted: cfg.cardsMinted.toString(),
+            vault: cfg.vault?.toBase58(), openFee: cfg.openFee?.toString(), sealFee: cfg.sealFee?.toString(), refundAfterSecs: cfg.refundAfterSecs?.toString(), pendingPacks: cfg.pendingPacks?.toString(), packsRefunded: cfg.packsRefunded?.toString() });
         for (const t of [cfg.activeTree, cfg.standbyTree]) {
             if (t.equals(PublicKey.default)) continue;
             const tc = c.treeConfigInfo((await conn.getAccountInfo(c.treeConfigPda(t))).data);
@@ -292,7 +405,7 @@ async function ensureLookupTable(authority, ixs, exclude) {
 
 async function showPack(sig, exp) {
     const tx = await conn.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
-    const table = c.decodeCardTable((await conn.getAccountInfo(c.cardsPda(1))).data);
+    const table = c.decodeCardTable((await conn.getAccountInfo(c.cardsPda(fcId()))).data);
     console.log('compute units', tx.meta.computeUnitsConsumed);
     for (const ev of c.decodeEvents(tx)) {
         if (ev.name !== 'PackMinted') continue;

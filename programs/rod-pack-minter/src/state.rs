@@ -34,19 +34,21 @@ pub struct Config {
     pub mint_authority_bump: u8,
     // ---- v2 (two-step purchase). Appended so `migrate_config` can extend a v1 account in place. ----
     /// Program-owned $BOOTY token account (PDA ["vault", booty_mint], authority = config) that holds a pack's price
-    /// between `buy_pack` and `open_pack` / `refund_pack`.
+    /// between `buy_pack` and `open_pack` / the admin's `refund_pack`.
     pub vault: Pubkey,
     /// Lamports the player deposits with every purchase; `open_pack` pays them to whoever sends it, so the opener's
     /// transaction fee is covered by the player.
     pub open_fee_lamports: u64,
     /// Lamports the player deposits for a separate `seal_pack` (only needed when opening is delayed); paid to the sealer.
     pub seal_fee_lamports: u64,
-    /// Seconds after purchase from which the player may take an unopened pack's price back.
+    /// Seconds after purchase before the admin may refund an unopened pack (so a refund never races a slow opener).
     pub refund_after_secs: i64,
     /// Purchases not yet opened or refunded.
     pub pending_packs: u64,
     pub packs_refunded: u64,
-    pub _reserved: [u8; 64],
+    /// Tree leaves promised to pending packs; `buy_pack` only sells when active + standby trees have room for them.
+    pub reserved_leaves: u64,
+    pub _reserved: [u8; 56],
 }
 
 impl Config {
@@ -54,8 +56,9 @@ impl Config {
     pub const V1_LEN: usize = 8 + 32 * 8 + 1 + 4 * 4 + 2 + 8 + 8 + 1 + 1;
 }
 
-/// A paid, not yet opened pack. PDA ["pack", player, order_id]. Closed by `open_pack` or `refund_pack`, which return
-/// its rent to the player.
+/// A paid, not yet opened pack. PDA ["pack", player, order_id]. Closed by `open_pack` or the admin's `refund_pack`,
+/// which return its rent to the player. The draw inputs (weights and card counts) are frozen here at purchase, so
+/// later admin edits to the expansion cannot change a paid pack.
 #[account]
 #[derive(InitSpace)]
 pub struct PendingPack {
@@ -76,6 +79,11 @@ pub struct PendingPack {
     pub open_fee: u64,
     pub seal_fee: u64,
     pub bump: u8,
+    pub weights_regular: [u16; RARITY_COUNT],
+    pub weights_guaranteed: [u16; RARITY_COUNT],
+    /// Cards per rarity at purchase. Cards are only appended, so the first `rarity_counts[r]` cards of rarity r are
+    /// the same set at open time.
+    pub rarity_counts: [u16; RARITY_COUNT],
 }
 
 /// One card expansion (First Crush = 1). PDA ["expansion", id as u16 LE].
@@ -215,8 +223,6 @@ pub struct PackBought {
 #[event]
 pub struct PackSealed {
     pub pending_pack: Pubkey,
-    /// false: the purchase slot's hash was used; true: it had left SlotHashes and the fallback hash was used.
-    pub fallback: bool,
     pub slot_hash: [u8; 32],
 }
 

@@ -51,6 +51,7 @@ pub struct InitParams {
 pub fn handle_initialize(ctx: Context<Initialize>, p: InitParams) -> Result<()> {
     require_keys_eq!(ctx.accounts.booty_destination.mint, ctx.accounts.booty_mint.key(), ErrorCode::WrongPaymentAccount);
     require_plain_mint(&ctx.accounts.booty_mint.to_account_info())?;
+    require_keys_neq!(ctx.accounts.booty_destination.key(), ctx.accounts.vault.key(), ErrorCode::VaultNotAllowed);
     validate_tree_size(p.tree_max_depth, p.tree_max_buffer, p.tree_canopy_depth)?;
     validate_fees(p.open_fee_lamports, p.seal_fee_lamports, p.refund_after_secs)?;
     let c = &mut ctx.accounts.config;
@@ -78,6 +79,7 @@ pub fn handle_initialize(ctx: Context<Initialize>, p: InitParams) -> Result<()> 
     c.refund_after_secs = p.refund_after_secs;
     c.pending_packs = 0;
     c.packs_refunded = 0;
-    c._reserved = [0u8; 64];
+    c.reserved_leaves = 0;
+    c._reserved = [0u8; 56];
     Ok(())
 }

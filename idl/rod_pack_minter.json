@@ -457,6 +457,12 @@
           "name": "token_program"
         },
         {
+          "name": "active_tree_config"
+        },
+        {
+          "name": "standby_tree_config"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         },
@@ -1096,11 +1102,11 @@
       ],
       "accounts": [
         {
-          "name": "player",
+          "name": "admin",
           "writable": true,
           "signer": true,
           "relations": [
-            "pending_pack"
+            "config"
           ]
         },
         {
@@ -1138,7 +1144,8 @@
               },
               {
                 "kind": "account",
-                "path": "player"
+                "path": "pending_pack.player",
+                "account": "PendingPack"
               },
               {
                 "kind": "account",
@@ -1149,13 +1156,17 @@
           }
         },
         {
+          "name": "player",
+          "writable": true
+        },
+        {
           "name": "vault",
           "writable": true
         },
         {
           "name": "player_token",
           "docs": [
-            "The player's $BOOTY account (any account of the mint the player chooses)."
+            "A $BOOTY account owned by the player."
           ],
           "writable": true
         },
@@ -1321,6 +1332,51 @@
           "type": "pubkey"
         }
       ]
+    },
+    {
+      "name": "set_destination",
+      "discriminator": [
+        153,
+        118,
+        17,
+        95,
+        172,
+        62,
+        206,
+        93
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "booty_destination"
+        }
+      ],
+      "args": []
     },
     {
       "name": "set_expansion_paused",
@@ -2132,198 +2188,193 @@
     },
     {
       "code": 6006,
-      "name": "NotTopLevel",
-      "msg": "buy_pack must be a top-level instruction"
-    },
-    {
-      "code": 6007,
-      "name": "ForbiddenFollowingInstruction",
-      "msg": "Only compute-budget or Lighthouse instructions may follow buy_pack"
-    },
-    {
-      "code": 6008,
-      "name": "ForbiddenLighthouseAccount",
-      "msg": "A Lighthouse instruction may not reference the pack accounts"
-    },
-    {
-      "code": 6009,
       "name": "WrongApprover",
       "msg": "Wrong approver"
     },
     {
-      "code": 6010,
+      "code": 6007,
       "name": "NotActiveTree",
       "msg": "This is not the active tree"
     },
     {
-      "code": 6011,
+      "code": 6008,
       "name": "TreeFull",
       "msg": "The active tree has no room for this pack; rotate to the standby tree first"
     },
     {
-      "code": 6012,
+      "code": 6009,
       "name": "NoActiveTree",
       "msg": "There is no active tree"
     },
     {
-      "code": 6013,
+      "code": 6010,
       "name": "StandbyExists",
       "msg": "A standby tree already exists"
     },
     {
-      "code": 6014,
+      "code": 6011,
       "name": "NoStandbyTree",
       "msg": "There is no standby tree to rotate to"
     },
     {
-      "code": 6015,
+      "code": 6012,
       "name": "TreeNotFull",
       "msg": "The active tree still has room"
     },
     {
-      "code": 6016,
+      "code": 6013,
       "name": "BadTreeAccount",
       "msg": "The tree account has the wrong owner or size"
     },
     {
-      "code": 6017,
+      "code": 6014,
       "name": "BadTreeConfig",
       "msg": "Bad tree config account"
     },
     {
-      "code": 6018,
+      "code": 6015,
       "name": "WrongCollection",
       "msg": "Wrong collection for this expansion"
     },
     {
-      "code": 6019,
+      "code": 6016,
       "name": "WrongPaymentAccount",
       "msg": "Wrong $BOOTY mint or destination"
     },
     {
-      "code": 6020,
+      "code": 6017,
       "name": "BadPackSize",
       "msg": "Pack size must be 1 to 10"
     },
     {
-      "code": 6021,
+      "code": 6018,
       "name": "BadWeights",
-      "msg": "Weights must sum to more than 0, and only rarities that have cards may have weight"
+      "msg": "No card can be drawn with these weights: weighted rarities have no cards"
     },
     {
-      "code": 6022,
+      "code": 6019,
       "name": "BadRoyalty",
       "msg": "Royalty must be at most 10000 bps"
     },
     {
-      "code": 6023,
+      "code": 6020,
       "name": "TextTooLong",
       "msg": "Text too long"
     },
     {
-      "code": 6024,
+      "code": 6021,
       "name": "BadRarity",
       "msg": "Bad rarity"
     },
     {
-      "code": 6025,
+      "code": 6022,
       "name": "BadCardId",
       "msg": "Card id out of range"
     },
     {
-      "code": 6026,
+      "code": 6023,
       "name": "TooManyCards",
       "msg": "Too many cards"
     },
     {
-      "code": 6027,
+      "code": 6024,
       "name": "BadCardIndex",
       "msg": "Card index must be at most the current card count"
     },
     {
-      "code": 6028,
+      "code": 6025,
       "name": "NoCards",
       "msg": "The expansion has no cards"
     },
     {
-      "code": 6029,
+      "code": 6026,
       "name": "BadDiscount",
       "msg": "Discount period is invalid"
     },
     {
-      "code": 6030,
+      "code": 6027,
       "name": "BadCount",
       "msg": "Admin mint count must be 1 to 6"
     },
     {
-      "code": 6031,
+      "code": 6028,
       "name": "BadSlotHashes",
       "msg": "Bad SlotHashes sysvar"
     },
     {
-      "code": 6032,
+      "code": 6029,
       "name": "Overflow",
       "msg": "Arithmetic overflow"
     },
     {
-      "code": 6033,
+      "code": 6030,
       "name": "TooEarlyToOpen",
       "msg": "The pack can be opened from the slot after its purchase"
     },
     {
-      "code": 6034,
+      "code": 6031,
       "name": "AlreadySealed",
       "msg": "The pack is already sealed"
     },
     {
-      "code": 6035,
+      "code": 6032,
       "name": "SlotHashUnavailable",
-      "msg": "The purchase slot's hash is no longer in SlotHashes; use the fallback (open after expiry)"
+      "msg": "The purchase slot's hash is no longer in SlotHashes; the pack can only be refunded by the admin"
     },
     {
-      "code": 6036,
+      "code": 6033,
       "name": "TooEarlyToRefund",
       "msg": "The refund period has not started"
     },
     {
-      "code": 6037,
+      "code": 6034,
       "name": "WrongPlayer",
       "msg": "Wrong player for this pack"
     },
     {
-      "code": 6038,
+      "code": 6035,
       "name": "WrongVault",
       "msg": "Wrong vault"
     },
     {
-      "code": 6039,
+      "code": 6036,
       "name": "FeeTooHigh",
       "msg": "Fee too high"
     },
     {
-      "code": 6040,
+      "code": 6037,
       "name": "PacksPending",
       "msg": "Packs are pending; open or refund them first"
     },
     {
-      "code": 6041,
+      "code": 6038,
       "name": "AlreadyMigrated",
       "msg": "The config is already migrated"
     },
     {
-      "code": 6042,
+      "code": 6039,
       "name": "MintHasExtensions",
       "msg": "Token mints with extensions are not supported"
     },
     {
-      "code": 6043,
+      "code": 6040,
       "name": "CollectionLocked",
       "msg": "Cannot change the collection after cards were minted"
     },
     {
-      "code": 6044,
+      "code": 6041,
       "name": "ZeroDiscount",
       "msg": "A discount needs a price above 0"
+    },
+    {
+      "code": 6042,
+      "name": "RarityLocked",
+      "msg": "A card's rarity cannot change once it is in the table"
+    },
+    {
+      "code": 6043,
+      "name": "VaultNotAllowed",
+      "msg": "The vault cannot be the destination or the refund account"
     }
   ],
   "types": [
@@ -2512,7 +2563,7 @@
             "name": "vault",
             "docs": [
               "Program-owned $BOOTY token account (PDA [\"vault\", booty_mint], authority = config) that holds a pack's price",
-              "between `buy_pack` and `open_pack` / `refund_pack`."
+              "between `buy_pack` and `open_pack` / the admin's `refund_pack`."
             ],
             "type": "pubkey"
           },
@@ -2534,7 +2585,7 @@
           {
             "name": "refund_after_secs",
             "docs": [
-              "Seconds after purchase from which the player may take an unopened pack's price back."
+              "Seconds after purchase before the admin may refund an unopened pack (so a refund never races a slow opener)."
             ],
             "type": "i64"
           },
@@ -2550,11 +2601,18 @@
             "type": "u64"
           },
           {
+            "name": "reserved_leaves",
+            "docs": [
+              "Tree leaves promised to pending packs; `buy_pack` only sells when active + standby trees have room for them."
+            ],
+            "type": "u64"
+          },
+          {
             "name": "_reserved",
             "type": {
               "array": [
                 "u8",
-                64
+                56
               ]
             }
           }
@@ -2922,13 +2980,6 @@
             "type": "pubkey"
           },
           {
-            "name": "fallback",
-            "docs": [
-              "false: the purchase slot's hash was used; true: it had left SlotHashes and the fallback hash was used."
-            ],
-            "type": "bool"
-          },
-          {
             "name": "slot_hash",
             "type": {
               "array": [
@@ -2943,8 +2994,9 @@
     {
       "name": "PendingPack",
       "docs": [
-        "A paid, not yet opened pack. PDA [\"pack\", player, order_id]. Closed by `open_pack` or `refund_pack`, which return",
-        "its rent to the player."
+        "A paid, not yet opened pack. PDA [\"pack\", player, order_id]. Closed by `open_pack` or the admin's `refund_pack`,",
+        "which return its rent to the player. The draw inputs (weights and card counts) are frozen here at purchase, so",
+        "later admin edits to the expansion cannot change a paid pack."
       ],
       "type": {
         "kind": "struct",
@@ -3019,6 +3071,37 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "weights_regular",
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "weights_guaranteed",
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "rarity_counts",
+            "docs": [
+              "Cards per rarity at purchase. Cards are only appended, so the first `rarity_counts[r]` cards of rarity r are",
+              "the same set at open time."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
           }
         ]
       }

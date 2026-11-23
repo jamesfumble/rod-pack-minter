@@ -1,7 +1,7 @@
 //! rod_pack_minter: sells card packs for Reign of Desire expansions as Bubblegum v1 cNFTs.
 //! A purchase has two steps. `buy_pack` (player + backend approver) moves the $BOOTY price into the program's vault.
 //! `open_pack` (anyone, normally the backend a moment later) draws the cards from the purchase slot's hash, mints them,
-//! and releases the price to the shop. A pack nobody opens can be refunded by the player after `refund_after_secs`.
+//! and releases the price to the shop. A pack that cannot be opened can only be refunded by the admin.
 //! The player pays every fee: the opener is repaid from the player's deposit. Only `admin_mint` can choose a card.
 
 pub mod bubblegum;
@@ -31,6 +31,9 @@ pub mod rod_pack_minter {
     }
     pub fn init_vault(ctx: Context<InitVault>) -> Result<()> {
         instructions::admin::handle_init_vault(ctx)
+    }
+    pub fn set_destination(ctx: Context<SetDestination>) -> Result<()> {
+        instructions::admin::handle_set_destination(ctx)
     }
     pub fn set_fees(ctx: Context<AdminOnly>, open_fee_lamports: u64, seal_fee_lamports: u64, refund_after_secs: i64) -> Result<()> {
         instructions::admin::handle_set_fees(ctx, open_fee_lamports, seal_fee_lamports, refund_after_secs)

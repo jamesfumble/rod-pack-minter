@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use solana_sha256_hasher::hashv;
 
 use crate::{
     constants::*,
@@ -50,23 +49,19 @@ pub fn lookup_slot_hash(slot_hashes: &AccountInfo, slot: u64) -> Result<SlotLook
     err!(ErrorCode::BadSlotHashes)
 }
 
-/// Used only when nobody sealed the pack within ~512 slots of its purchase. It is fixed at purchase time, so it
-/// gives at most one alternative outcome, and only during a total outage of every opener (see docs/security.md).
-pub fn fallback_hash(pending_pack: &Pubkey, purchase_slot: u64) -> [u8; 32] {
-    hashv(&[b"rod-pack-minter:fallback", pending_pack.as_ref(), &purchase_slot.to_le_bytes()]).to_bytes()
-}
-
-/// Records the hash the draw will use. Returns true if the fallback was used.
-pub fn seal(pending: &mut PendingPack, pending_key: &Pubkey, slot_hashes: &AccountInfo) -> Result<bool> {
+/// Records the hash the draw will use: the purchase slot's own hash. If nobody sealed or opened the pack within the
+/// SlotHashes window (~512 slots, ~3.4 minutes), there is no fair hash left and only the admin can refund it. There
+/// is deliberately no fallback hash: any fallback would be a second outcome that someone could choose by stalling.
+pub fn seal(pending: &mut PendingPack, slot_hashes: &AccountInfo) -> Result<()> {
     require!(!pending.sealed, ErrorCode::AlreadySealed);
-    let (hash, fallback) = match lookup_slot_hash(slot_hashes, pending.purchase_slot)? {
-        SlotLookup::Found(h) => (h, false),
+    let hash = match lookup_slot_hash(slot_hashes, pending.purchase_slot)? {
+        SlotLookup::Found(h) => h,
         SlotLookup::TooEarly => return err!(ErrorCode::TooEarlyToOpen),
-        SlotLookup::Expired => (fallback_hash(pending_key, pending.purchase_slot), true),
+        SlotLookup::Expired => return err!(ErrorCode::SlotHashUnavailable),
     };
     pending.sealed = true;
     pending.slot_hash = hash;
-    Ok(fallback)
+    Ok(())
 }
 
 /// Moves lamports out of a program-owned account (the PendingPack) to `to`.
@@ -79,8 +74,8 @@ pub fn pay_from_pending(pending: &AccountInfo, to: &AccountInfo, lamports: u64) 
     Ok(())
 }
 
-/// Anyone may seal a pack, e.g. when opening has to wait (a full tree). It only stores the purchase slot's hash,
-/// so the cards are fixed and SlotHashes expiry no longer matters. The sealer receives the player's seal deposit.
+/// Anyone may seal a pack, e.g. when opening has to wait. It only stores the purchase slot's hash, so the cards are
+/// fixed and SlotHashes expiry no longer matters. The sealer receives the player's seal deposit.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct SealPack<'info> {
@@ -98,10 +93,10 @@ pub struct SealPack<'info> {
 
 pub fn handle_seal_pack(ctx: Context<SealPack>) -> Result<()> {
     let key = ctx.accounts.pending_pack.key();
-    let fallback = seal(&mut ctx.accounts.pending_pack, &key, &ctx.accounts.slot_hashes.to_account_info())?;
+    seal(&mut ctx.accounts.pending_pack, &ctx.accounts.slot_hashes.to_account_info())?;
     let fee = ctx.accounts.pending_pack.seal_fee;
     ctx.accounts.pending_pack.seal_fee = 0;
     pay_from_pending(&ctx.accounts.pending_pack.to_account_info(), &ctx.accounts.sealer.to_account_info(), fee)?;
-    emit_cpi!(PackSealed { pending_pack: key, fallback, slot_hash: ctx.accounts.pending_pack.slot_hash });
+    emit_cpi!(PackSealed { pending_pack: key, slot_hash: ctx.accounts.pending_pack.slot_hash });
     Ok(())
 }

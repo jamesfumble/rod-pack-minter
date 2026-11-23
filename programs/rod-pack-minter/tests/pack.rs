@@ -11,7 +11,6 @@ use rod_pack_minter::{
     bubblegum,
     constants::*,
     draw::{draw_pack, pack_seed},
-    fallback_hash,
 };
 use solana_keypair::Keypair;
 use solana_signer::Signer;
@@ -41,7 +40,7 @@ fn purchase_then_open_and_the_player_pays_every_fee() {
     assert_eq!(token_amount(&env.svm, &vault_pda(&env.booty_mint)), 150 * BOOTY, "price held in the vault");
     assert_eq!(token_amount(&env.svm, &env.shop_token), 0);
     assert_eq!(env.num_minted(&tree), 0, "nothing minted yet");
-    assert_eq!(env.config().pending_packs, 1);
+    assert_eq!((env.config().pending_packs, env.config().reserved_leaves), (1, 6));
 
     // The cards do not exist yet: opening in the purchase slot fails.
     assert_err(env.open(&order, id), "TooEarlyToOpen");
@@ -59,7 +58,7 @@ fn purchase_then_open_and_the_player_pays_every_fee() {
     assert!(ev.card_ids[5] >= 22, "guaranteed slot drew card {}", ev.card_ids[5]);
     assert_eq!((ev.player, ev.tree, ev.first_leaf_index, ev.price), (player, tree, 0, 150 * BOOTY));
     let c = env.config();
-    assert_eq!((c.packs_sold, c.cards_minted, c.pending_packs), (1, 6, 0));
+    assert_eq!((c.packs_sold, c.cards_minted, c.pending_packs, c.reserved_leaves), (1, 6, 0, 0));
 
     // Fees: the player paid the buy transaction (2 signatures) plus the opener's deposit; the PendingPack rent came back.
     let player_spent = sol_before - env.svm.get_balance(&player).unwrap();
@@ -115,48 +114,124 @@ fn a_sealed_pack_keeps_its_cards_after_slot_hashes_expire() {
 }
 
 #[test]
-fn an_unsealed_pack_past_the_window_uses_the_fallback() {
-    let (mut env, id, _) = Env::ready();
+fn an_unsealed_pack_past_the_window_cannot_be_opened_only_refunded_by_the_admin() {
+    let (mut env, id, tree) = Env::ready();
     let order = env.buy(id, 150 * BOOTY).unwrap();
     let purchase_slot = current_slot(&env.svm);
     warp(&mut env.svm, purchase_slot + 600);
-    let meta = env.open(&order, id).expect("open after expiry");
-    let fb = fallback_hash(&pending_pda(&env.player.pubkey(), &order), purchase_slot);
-    assert_eq!(pack_event(&meta).card_ids, expected_cards(&env, &fb, &order, purchase_slot, id));
+    assert_err(env.open(&order, id), "SlotHashUnavailable");
+    let sealer = env.opener.insecure_clone();
+    let ix = env.seal_ix(&sealer.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &sealer, &[]), "SlotHashUnavailable");
+    assert_eq!(env.num_minted(&tree), 0);
+    let now = env.now();
+    env.set_time(now + REFUND_AFTER);
+    let ix = env.refund_ix(&env.admin.pubkey(), &order);
+    env.run_admin(ix).expect("admin refund");
+    assert!(env.pending(&order).is_none());
 }
 
 #[test]
-fn refund_only_after_the_delay_and_only_for_the_player() {
+fn refund_is_admin_only_and_returns_price_and_rent() {
     let (mut env, id, _) = Env::ready();
     let booty_before = token_amount(&env.svm, &env.player_token);
     let sol_before = env.svm.get_balance(&env.player.pubkey()).unwrap();
     let order = env.buy(id, 150 * BOOTY).unwrap();
-    let player = env.player.insecure_clone();
 
-    let ix = env.refund_ix(&order);
-    assert_err(send(&mut env.svm, &[ix], &player, &[]), "TooEarlyToRefund");
-
-    // Somebody else cannot take it, even after the delay.
+    // Too early, even for the admin.
+    let ix = env.refund_ix(&env.admin.pubkey(), &order);
+    assert_err(env.run_admin(ix), "TooEarlyToRefund");
     let now = env.now();
     env.set_time(now + REFUND_AFTER);
-    let thief = Keypair::new();
-    env.svm.airdrop(&thief.pubkey(), 1_000_000_000).unwrap();
-    let mut ix = env.refund_ix(&order);
-    ix.accounts[0].pubkey = thief.pubkey();
-    assert!(send(&mut env.svm, &[ix], &thief, &[]).is_err(), "only the player may refund");
 
-    let ix = env.refund_ix(&order);
-    send(&mut env.svm, &[ix], &player, &[]).expect("refund");
+    // The player (or anyone else) cannot refund: they could otherwise return packs whose cards they dislike.
+    let player = env.player.insecure_clone();
+    let ix = env.refund_ix(&player.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &player, &[]), "Unauthorized");
+
+    // The price must go to an account the player owns.
+    let mut ix = env.refund_ix(&env.admin.pubkey(), &order);
+    let other = Pubkey::new_unique();
+    set_owned(&mut env.svm, other, TOKEN_PROGRAM, token_account_data(&env.booty_mint, &Pubkey::new_unique(), 0));
+    for m in ix.accounts.iter_mut() {
+        if m.pubkey == env.player_token {
+            m.pubkey = other;
+        }
+    }
+    assert!(env.run_admin(ix).is_err(), "refund to a stranger's account must fail");
+
+    let admin_before = env.svm.get_balance(&env.admin.pubkey()).unwrap();
+    let ix = env.refund_ix(&env.admin.pubkey(), &order);
+    env.run_admin(ix).expect("admin refund");
     assert_eq!(token_amount(&env.svm, &env.player_token), booty_before, "price back");
     assert!(env.pending(&order).is_none());
-    // Only transaction fees are lost (buy, the early refund attempt, the refund); rent and the deposit came back.
-    assert_eq!(sol_before - env.svm.get_balance(&env.player.pubkey()).unwrap(), 10_000 + 5_000 + 5_000);
+    // The player paid the buy transaction, their own rejected refund attempt, and the deposit (now the admin's, for
+    // sending the refund); the rent came back.
+    assert_eq!(sol_before - env.svm.get_balance(&env.player.pubkey()).unwrap(), 10_000 + 5_000 + OPEN_FEE + SEAL_FEE);
+    assert_eq!(env.svm.get_balance(&env.admin.pubkey()).unwrap() + 5_000 - admin_before, OPEN_FEE + SEAL_FEE);
     let c = env.config();
-    assert_eq!((c.pending_packs, c.packs_refunded), (0, 1));
-    // A refunded pack can no longer be opened.
+    assert_eq!((c.pending_packs, c.packs_refunded, c.reserved_leaves), (0, 1, 0));
     let s = current_slot(&env.svm);
     warp(&mut env.svm, s + 1);
-    assert!(env.open(&order, id).is_err());
+    assert!(env.open(&order, id).is_err(), "a refunded pack cannot be opened");
+}
+
+#[test]
+fn admin_edits_after_purchase_do_not_change_a_paid_pack() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let purchase_slot = current_slot(&env.svm);
+    let expected = expected_cards(&env, &slot_hash_of(purchase_slot), &order, purchase_slot, id);
+    // New weights and an extra Common card after the purchase.
+    let mut p = env.first_crush_params();
+    p.weights_regular = [1, 1, 98, 0];
+    let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::UpdateExpansion { expansion_id: id, params: p }.data());
+    env.run_admin(ix).unwrap();
+    let card = rod_pack_minter::CardInput { rarity: 0, name: "Late Card".into(), uri_suffix: "late.json".into() };
+    let ix = env.upsert_ix(&env.admin.pubkey(), id, 66, vec![card]);
+    env.run_admin(ix).unwrap();
+    let meta = env.next_slot_and_open(&order, id).unwrap();
+    assert_eq!(pack_event(&meta).card_ids, expected, "drawn with the weights and cards frozen at purchase");
+}
+
+#[test]
+fn a_cards_rarity_is_locked_and_undrawable_packs_are_not_sold() {
+    let (mut env, id, _) = Env::ready();
+    let card = rod_pack_minter::CardInput { rarity: 2, name: "Pool Palapa".into(), uri_suffix: "x.json".into() };
+    let ix = env.upsert_ix(&env.admin.pubkey(), id, 0, vec![card]);
+    assert_err(env.run_admin(ix), "RarityLocked");
+    // Renaming keeps the rarity: allowed (metadata is mutable for future mints).
+    let card = rod_pack_minter::CardInput { rarity: 0, name: "Renamed".into(), uri_suffix: "x.json".into() };
+    let ix = env.upsert_ix(&env.admin.pubkey(), id, 0, vec![card]);
+    env.run_admin(ix).unwrap();
+    // Weight only on a rarity without cards: nothing could be drawn, so nothing is sold.
+    let mut p = env.first_crush_params();
+    p.weights_regular = [0, 0, 0, 10];
+    let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::UpdateExpansion { expansion_id: id, params: p }.data());
+    env.run_admin(ix).unwrap();
+    assert_err(env.buy(id, 150 * BOOTY), "BadWeights");
+}
+
+#[test]
+fn the_shop_account_can_be_replaced_but_never_with_the_vault() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let set = |env: &Env, dest: Pubkey| {
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::SetDestination {}.data(),
+            rod_pack_minter::accounts::SetDestination { admin: env.admin.pubkey(), config: config_pda(), booty_destination: dest }.to_account_metas(None),
+        )
+    };
+    let ix = set(&env, vault_pda(&env.booty_mint));
+    assert_err(env.run_admin(ix), "VaultNotAllowed");
+    let new_shop = Pubkey::new_unique();
+    set_owned(&mut env.svm, new_shop, TOKEN_PROGRAM, token_account_data(&env.booty_mint, &Pubkey::new_unique(), 0));
+    let ix = set(&env, new_shop);
+    env.run_admin(ix).expect("replace while a pack is pending");
+    env.shop_token = new_shop;
+    env.next_slot_and_open(&order, id).unwrap();
+    assert_eq!(token_amount(&env.svm, &new_shop), 150 * BOOTY);
 }
 
 #[test]
@@ -476,9 +551,10 @@ fn trees_are_made_by_admin_or_funder_and_rotate_when_full() {
     // Depth 3 = 8 leaves: one 6-card pack fits, a second does not.
     let (mut env, id, first) = Env::ready_with(Env::with_tree_size(3, 8, 0));
     env.buy_and_open(id, 150 * BOOTY).expect("first pack");
-    let order = env.buy(id, 150 * BOOTY).unwrap();
-    assert_err(env.next_slot_and_open(&order, id), "TreeFull");
-    assert!(env.pending(&order).is_some(), "the paid pack waits; nothing lost");
+    // Only 2 leaves left and no standby tree: the next pack is not sold at all (nothing is paid).
+    let booty = token_amount(&env.svm, &env.player_token);
+    assert_err(env.buy(id, 150 * BOOTY), "TreeFull");
+    assert_eq!(token_amount(&env.svm, &env.player_token), booty);
 
     let rotate = env.rotate_ix();
     let admin = env.admin.insecure_clone();
@@ -489,6 +565,10 @@ fn trees_are_made_by_admin_or_funder_and_rotate_when_full() {
     let funder = env.funder.insecure_clone();
     let standby = env.create_tree(&funder).expect("funder creates the standby tree");
     assert_err(env.create_tree(&funder), "StandbyExists");
+    // With the standby tree's room counted, the pack is sold.
+    let order = env.buy(id, 150 * BOOTY).expect("sold once there is room");
+    let s = current_slot(&env.svm);
+    warp(&mut env.svm, s + 1);
 
     // The backend puts rotate_tree in front of open_pack.
     let rotate = env.rotate_ix();

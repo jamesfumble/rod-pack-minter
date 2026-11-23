@@ -20,7 +20,7 @@ pub fn validate_tree_size(max_depth: u32, max_buffer: u32, canopy_depth: u32) ->
 
 pub fn validate_fees(open_fee: u64, seal_fee: u64, refund_after_secs: i64) -> Result<()> {
     require!(open_fee <= MAX_FEE_LAMPORTS && seal_fee <= MAX_FEE_LAMPORTS, ErrorCode::FeeTooHigh);
-    // At least 10 minutes, so a refund can never race an opener that is merely slow.
+    // At least 10 minutes, so an admin refund can never race an opener that is merely slow.
     require!(refund_after_secs >= 600, ErrorCode::TooEarlyToRefund);
     Ok(())
 }
@@ -118,12 +118,30 @@ pub struct SetPayment<'info> {
 
 pub fn handle_set_payment(ctx: Context<SetPayment>) -> Result<()> {
     require!(ctx.accounts.config.pending_packs == 0, ErrorCode::PacksPending);
+    require_keys_neq!(ctx.accounts.booty_destination.key(), ctx.accounts.vault.key(), ErrorCode::VaultNotAllowed);
     require_keys_eq!(ctx.accounts.booty_destination.mint, ctx.accounts.booty_mint.key(), ErrorCode::WrongPaymentAccount);
     require_plain_mint(&ctx.accounts.booty_mint.to_account_info())?;
     let c = &mut ctx.accounts.config;
     c.booty_mint = ctx.accounts.booty_mint.key();
     c.booty_destination = ctx.accounts.booty_destination.key();
     c.vault = ctx.accounts.vault.key();
+    Ok(())
+}
+
+/// Replaces the shop's $BOOTY account (same mint) at any time, e.g. if the old one was closed or frozen, which would
+/// otherwise block every `open_pack`.
+#[derive(Accounts)]
+pub struct SetDestination<'info> {
+    pub admin: Signer<'info>,
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ ErrorCode::Unauthorized)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(token::mint = config.booty_mint)]
+    pub booty_destination: Box<InterfaceAccount<'info, TokenAccount>>,
+}
+
+pub fn handle_set_destination(ctx: Context<SetDestination>) -> Result<()> {
+    require_keys_neq!(ctx.accounts.booty_destination.key(), ctx.accounts.config.vault, ErrorCode::VaultNotAllowed);
+    ctx.accounts.config.booty_destination = ctx.accounts.booty_destination.key();
     Ok(())
 }
 

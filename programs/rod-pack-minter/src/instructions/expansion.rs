@@ -166,6 +166,17 @@ pub fn handle_upsert_cards(ctx: Context<UpsertCards>, _expansion_id: u16, start_
         require!(!c.name.is_empty() && c.name.len() <= MAX_NAME_LEN, ErrorCode::TextTooLong);
         require!(c.uri_suffix.len() <= MAX_URI_SUFFIX_LEN && prefix_len + c.uri_suffix.len() <= MAX_URI_LEN, ErrorCode::TextTooLong);
     }
+    // A card's rarity is fixed once it is in the table: pending packs drew their rarity counts at purchase.
+    {
+        let info = ctx.accounts.card_table.to_account_info();
+        let data = info.try_borrow_data()?;
+        for (i, c) in cards.iter().enumerate() {
+            if start + i < old_count {
+                let old = crate::state::card_at(&data, start + i).ok_or(ErrorCode::BadCardId)?;
+                require!(old.rarity == c.rarity, ErrorCode::RarityLocked);
+            }
+        }
+    }
     let new_count = old_count.max(start + cards.len());
     let new_len = CardTable::len_for(new_count);
     let info = ctx.accounts.card_table.to_account_info();

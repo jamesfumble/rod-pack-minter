@@ -47,6 +47,6 @@ Program id: `RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN`, the same on devnet an
 offline by James and is needed only for the first deploy on each network (`--program-id <path>`); after that the
 upgrade authority signs upgrades.
 
-`anchor build` writes a random placeholder `target\deployod_pack_minter-keypair.json` when the real key file is not
+`anchor build` writes a random placeholder `target/deploy/rod_pack_minter-keypair.json` when the real key file is not
 there and prints "Program ID mismatch". That is harmless for building and testing. **Never run `anchor keys sync`**: it
 would replace the program id with the placeholder. Deploy with `solana program deploy ... --program-id <real key path>`.

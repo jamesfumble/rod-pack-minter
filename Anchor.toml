@@ -9,7 +9,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-rod_pack_minter = "Br5i2LnUyYwtCFm1NkjPNYWpAeHaRtEwMUjMiaupu6Uw"
+rod_pack_minter = "RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN"
 
 [provider]
 cluster = "localnet"

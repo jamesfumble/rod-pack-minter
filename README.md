@@ -43,5 +43,10 @@ The tests run in LiteSVM with the real Metaplex programs. Measured: 6-card pack 
 No key file is ever committed (`.gitignore` blocks `*keypair*.json`, `.env`, `target/`). Scripts take key file paths
 as arguments and never print keys.
 
-The program id in `declare_id!` / `Anchor.toml` (`Br5i2...`) is a local development key. Before the first devnet
-deploy it is replaced by the final program id, the same one later used on mainnet.
+Program id: `RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN`, the same on devnet and mainnet. Its key file is kept
+offline by James and is needed only for the first deploy on each network (`--program-id <path>`); after that the
+upgrade authority signs upgrades.
+
+`anchor build` writes a random placeholder `target\deployod_pack_minter-keypair.json` when the real key file is not
+there and prints "Program ID mismatch". That is harmless for building and testing. **Never run `anchor keys sync`**: it
+would replace the program id with the placeholder. Deploy with `solana program deploy ... --program-id <real key path>`.

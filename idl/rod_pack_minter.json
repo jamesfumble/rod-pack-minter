@@ -1,5 +1,5 @@
 {
-  "address": "Br5i2LnUyYwtCFm1NkjPNYWpAeHaRtEwMUjMiaupu6Uw",
+  "address": "RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN",
   "metadata": {
     "name": "rod_pack_minter",
     "version": "0.1.0",
@@ -682,7 +682,7 @@
         },
         {
           "name": "program",
-          "address": "Br5i2LnUyYwtCFm1NkjPNYWpAeHaRtEwMUjMiaupu6Uw"
+          "address": "RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN"
         },
         {
           "name": "program_data"

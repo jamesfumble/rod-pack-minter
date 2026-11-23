@@ -15,7 +15,7 @@ pub use constants::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("Br5i2LnUyYwtCFm1NkjPNYWpAeHaRtEwMUjMiaupu6Uw");
+declare_id!("RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN");
 
 #[program]
 pub mod rod_pack_minter {

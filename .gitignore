@@ -1,0 +1,22 @@
+# Build output (target/deploy holds the program keypair: never commit it)
+target
+.anchor
+test-ledger
+.surfpool
+node_modules
+.yarn
+**/*.rs.bk
+.DS_Store
+
+# Secrets: no key file or env file is ever committed
+.env
+.env.*
+!.env.example
+*keypair*.json
+*-key.json
+*.key
+keys/
+id.json
+
+# Program binaries for tests: fetched by scripts/fetch-fixtures.ps1
+tests/fixtures/*.so

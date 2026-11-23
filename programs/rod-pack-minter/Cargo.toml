@@ -1,0 +1,38 @@
+[package]
+name = "rod-pack-minter"
+version = "0.1.0"
+description = "Reign of Desire card packs: pays and mints a whole pack of Bubblegum v1 cNFTs in one transaction"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "rod_pack_minter"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { version = "1.2.2", features = ["event-cpi"] }
+anchor-spl = { version = "1.2.2" }
+solana-instructions-sysvar = "3"
+solana-sha256-hasher = "3"
+
+[dev-dependencies]
+# Cargo.lock pins LiteSVM's Rust-1.89-compatible dependency graph.
+litesvm = "0.15.0"
+solana-message = "4"
+solana-transaction = "4"
+solana-signer = "3"
+solana-keypair = "3"
+solana-account = "4"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

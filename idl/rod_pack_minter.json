@@ -1,0 +1,2177 @@
+{
+  "address": "Br5i2LnUyYwtCFm1NkjPNYWpAeHaRtEwMUjMiaupu6Uw",
+  "metadata": {
+    "name": "rod_pack_minter",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Reign of Desire card packs: pays and mints a whole pack of Bubblegum v1 cNFTs in one transaction"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "new_admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "add_expansion",
+      "discriminator": [
+        194,
+        156,
+        163,
+        60,
+        116,
+        239,
+        246,
+        228
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.next_expansion_id",
+                "account": "Config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "card_table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  114,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.next_expansion_id",
+                "account": "Config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "ExpansionParams"
+            }
+          }
+        },
+        {
+          "name": "price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "admin_mint",
+      "discriminator": [
+        137,
+        144,
+        88,
+        222,
+        36,
+        159,
+        250,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "card_table",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  114,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "recipient"
+        },
+        {
+          "name": "mint",
+          "accounts": [
+            {
+              "name": "mint_authority"
+            },
+            {
+              "name": "tree_config",
+              "writable": true
+            },
+            {
+              "name": "merkle_tree",
+              "writable": true
+            },
+            {
+              "name": "collection_mint"
+            },
+            {
+              "name": "collection_metadata",
+              "writable": true
+            },
+            {
+              "name": "collection_edition"
+            },
+            {
+              "name": "collection_authority_record"
+            },
+            {
+              "name": "bubblegum_signer"
+            },
+            {
+              "name": "log_wrapper",
+              "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+            },
+            {
+              "name": "compression_program",
+              "address": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK"
+            },
+            {
+              "name": "token_metadata_program",
+              "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+            },
+            {
+              "name": "bubblegum_program",
+              "address": "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY"
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "expansion_id",
+          "type": "u16"
+        },
+        {
+          "name": "card_id",
+          "type": "u16"
+        },
+        {
+          "name": "count",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "buy_pack",
+      "discriminator": [
+        151,
+        46,
+        141,
+        93,
+        174,
+        5,
+        49,
+        173
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "docs": [
+            "Pays the price and the fees, and receives the cards."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "approver",
+          "docs": [
+            "The backend's approver key: it signs last and sends the transaction, so a player cannot wrap the purchase."
+          ],
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "card_table",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  114,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_token",
+          "docs": [
+            "The player's $BOOTY account (transfer_checked enforces owner and mint)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "booty_destination",
+          "writable": true
+        },
+        {
+          "name": "booty_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "mint",
+          "accounts": [
+            {
+              "name": "mint_authority"
+            },
+            {
+              "name": "tree_config",
+              "writable": true
+            },
+            {
+              "name": "merkle_tree",
+              "writable": true
+            },
+            {
+              "name": "collection_mint"
+            },
+            {
+              "name": "collection_metadata",
+              "writable": true
+            },
+            {
+              "name": "collection_edition"
+            },
+            {
+              "name": "collection_authority_record"
+            },
+            {
+              "name": "bubblegum_signer"
+            },
+            {
+              "name": "log_wrapper",
+              "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+            },
+            {
+              "name": "compression_program",
+              "address": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK"
+            },
+            {
+              "name": "token_metadata_program",
+              "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+            },
+            {
+              "name": "bubblegum_program",
+              "address": "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY"
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "slot_hashes",
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "instructions",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": [
+        {
+          "name": "expansion_id",
+          "type": "u16"
+        },
+        {
+          "name": "order_id",
+          "type": {
+            "array": [
+              "u8",
+              16
+            ]
+          }
+        },
+        {
+          "name": "max_price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "create_tree",
+      "discriminator": [
+        165,
+        83,
+        136,
+        142,
+        89,
+        202,
+        47,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "docs": [
+            "The admin or the tree funder; pays the tree config rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "merkle_tree",
+          "writable": true
+        },
+        {
+          "name": "tree_config",
+          "writable": true
+        },
+        {
+          "name": "mint_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "log_wrapper",
+          "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+        },
+        {
+          "name": "compression_program",
+          "address": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK"
+        },
+        {
+          "name": "bubblegum_program",
+          "address": "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "Br5i2LnUyYwtCFm1NkjPNYWpAeHaRtEwMUjMiaupu6Uw"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "booty_mint"
+        },
+        {
+          "name": "booty_destination"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "approver",
+          "type": "pubkey"
+        },
+        {
+          "name": "tree_funder",
+          "type": "pubkey"
+        },
+        {
+          "name": "tree_max_depth",
+          "type": "u32"
+        },
+        {
+          "name": "tree_max_buffer",
+          "type": "u32"
+        },
+        {
+          "name": "tree_canopy_depth",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "new_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "rotate_tree",
+      "discriminator": [
+        41,
+        237,
+        195,
+        168,
+        158,
+        98,
+        247,
+        94
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "active_tree_config"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_approver",
+      "discriminator": [
+        139,
+        202,
+        200,
+        122,
+        109,
+        173,
+        219,
+        116
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "approver",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_expansion_paused",
+      "discriminator": [
+        57,
+        57,
+        2,
+        218,
+        188,
+        69,
+        63,
+        172
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "expansion_id",
+          "type": "u16"
+        },
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_payment",
+      "discriminator": [
+        165,
+        71,
+        217,
+        189,
+        133,
+        189,
+        87,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "booty_mint"
+        },
+        {
+          "name": "booty_destination"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_price",
+      "discriminator": [
+        16,
+        19,
+        182,
+        8,
+        149,
+        83,
+        72,
+        181
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "expansion_id",
+          "type": "u16"
+        },
+        {
+          "name": "price",
+          "type": "u64"
+        },
+        {
+          "name": "discount_price",
+          "type": "u64"
+        },
+        {
+          "name": "discount_start",
+          "type": "i64"
+        },
+        {
+          "name": "discount_end",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "set_tree_funder",
+      "discriminator": [
+        253,
+        228,
+        49,
+        116,
+        44,
+        162,
+        175,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "tree_funder",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_tree_size",
+      "discriminator": [
+        149,
+        46,
+        40,
+        241,
+        217,
+        143,
+        56,
+        33
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "max_depth",
+          "type": "u32"
+        },
+        {
+          "name": "max_buffer",
+          "type": "u32"
+        },
+        {
+          "name": "canopy_depth",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "update_expansion",
+      "discriminator": [
+        41,
+        52,
+        159,
+        177,
+        10,
+        188,
+        146,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "expansion_id",
+          "type": "u16"
+        },
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "ExpansionParams"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "upsert_cards",
+      "discriminator": [
+        66,
+        234,
+        226,
+        11,
+        107,
+        142,
+        115,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "card_table",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  114,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "expansion_id",
+          "type": "u16"
+        },
+        {
+          "name": "start_index",
+          "type": "u16"
+        },
+        {
+          "name": "cards",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "CardInput"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CardTable",
+      "discriminator": [
+        221,
+        186,
+        62,
+        207,
+        161,
+        64,
+        161,
+        16
+      ]
+    },
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Expansion",
+      "discriminator": [
+        43,
+        208,
+        222,
+        173,
+        134,
+        31,
+        255,
+        20
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AdminMinted",
+      "discriminator": [
+        208,
+        107,
+        215,
+        166,
+        197,
+        183,
+        237,
+        25
+      ]
+    },
+    {
+      "name": "PackMinted",
+      "discriminator": [
+        170,
+        130,
+        52,
+        22,
+        27,
+        240,
+        82,
+        110
+      ]
+    },
+    {
+      "name": "TreeCreated",
+      "discriminator": [
+        42,
+        82,
+        14,
+        91,
+        246,
+        61,
+        231,
+        67
+      ]
+    },
+    {
+      "name": "TreeRotated",
+      "discriminator": [
+        224,
+        187,
+        71,
+        255,
+        110,
+        168,
+        28,
+        40
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Only the admin may do this"
+    },
+    {
+      "code": 6001,
+      "name": "NotPendingAdmin",
+      "msg": "Only the pending admin may accept"
+    },
+    {
+      "code": 6002,
+      "name": "ProgramPaused",
+      "msg": "The program is paused"
+    },
+    {
+      "code": 6003,
+      "name": "ExpansionPaused",
+      "msg": "This expansion is paused"
+    },
+    {
+      "code": 6004,
+      "name": "OutsideSalePeriod",
+      "msg": "This expansion is not on sale now"
+    },
+    {
+      "code": 6005,
+      "name": "PriceAboveMax",
+      "msg": "The pack price is higher than the price the buyer accepted"
+    },
+    {
+      "code": 6006,
+      "name": "NotTopLevel",
+      "msg": "buy_pack must be a top-level instruction"
+    },
+    {
+      "code": 6007,
+      "name": "ForbiddenFollowingInstruction",
+      "msg": "Only compute-budget or Lighthouse instructions may follow buy_pack"
+    },
+    {
+      "code": 6008,
+      "name": "ForbiddenLighthouseAccount",
+      "msg": "A Lighthouse instruction may not reference the pack accounts"
+    },
+    {
+      "code": 6009,
+      "name": "WrongApprover",
+      "msg": "Wrong approver"
+    },
+    {
+      "code": 6010,
+      "name": "NotActiveTree",
+      "msg": "This is not the active tree"
+    },
+    {
+      "code": 6011,
+      "name": "TreeFull",
+      "msg": "The active tree has no room for this pack; rotate to the standby tree first"
+    },
+    {
+      "code": 6012,
+      "name": "NoActiveTree",
+      "msg": "There is no active tree"
+    },
+    {
+      "code": 6013,
+      "name": "StandbyExists",
+      "msg": "A standby tree already exists"
+    },
+    {
+      "code": 6014,
+      "name": "NoStandbyTree",
+      "msg": "There is no standby tree to rotate to"
+    },
+    {
+      "code": 6015,
+      "name": "TreeNotFull",
+      "msg": "The active tree still has room"
+    },
+    {
+      "code": 6016,
+      "name": "BadTreeAccount",
+      "msg": "The tree account has the wrong owner or size"
+    },
+    {
+      "code": 6017,
+      "name": "BadTreeConfig",
+      "msg": "Bad tree config account"
+    },
+    {
+      "code": 6018,
+      "name": "WrongCollection",
+      "msg": "Wrong collection for this expansion"
+    },
+    {
+      "code": 6019,
+      "name": "WrongPaymentAccount",
+      "msg": "Wrong $BOOTY mint or destination"
+    },
+    {
+      "code": 6020,
+      "name": "BadPackSize",
+      "msg": "Pack size must be 1 to 10"
+    },
+    {
+      "code": 6021,
+      "name": "BadWeights",
+      "msg": "Weights must sum to more than 0, and only rarities that have cards may have weight"
+    },
+    {
+      "code": 6022,
+      "name": "BadRoyalty",
+      "msg": "Royalty must be at most 10000 bps"
+    },
+    {
+      "code": 6023,
+      "name": "TextTooLong",
+      "msg": "Text too long"
+    },
+    {
+      "code": 6024,
+      "name": "BadRarity",
+      "msg": "Bad rarity"
+    },
+    {
+      "code": 6025,
+      "name": "BadCardId",
+      "msg": "Card id out of range"
+    },
+    {
+      "code": 6026,
+      "name": "TooManyCards",
+      "msg": "Too many cards"
+    },
+    {
+      "code": 6027,
+      "name": "BadCardIndex",
+      "msg": "Card index must be at most the current card count"
+    },
+    {
+      "code": 6028,
+      "name": "NoCards",
+      "msg": "The expansion has no cards"
+    },
+    {
+      "code": 6029,
+      "name": "BadDiscount",
+      "msg": "Discount period is invalid"
+    },
+    {
+      "code": 6030,
+      "name": "BadCount",
+      "msg": "Admin mint count must be 1 to 6"
+    },
+    {
+      "code": 6031,
+      "name": "BadSlotHashes",
+      "msg": "Bad SlotHashes sysvar"
+    },
+    {
+      "code": 6032,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdminMinted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "expansion_id",
+            "type": "u16"
+          },
+          {
+            "name": "card_id",
+            "type": "u16"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "tree",
+            "type": "pubkey"
+          },
+          {
+            "name": "first_leaf_index",
+            "type": "u64"
+          },
+          {
+            "name": "count",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CardEntry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "rarity",
+            "type": "u8"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "uri_suffix",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CardInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "rarity",
+            "type": "u8"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "uri_suffix",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "CardTable",
+      "docs": [
+        "The cards of one expansion. PDA [\"cards\", expansion id as u16 LE]. Grows with `upsert_cards`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "expansion_id",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "cards",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "CardEntry"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "docs": [
+        "Global settings. PDA [\"config\"]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "Signs every admin instruction (James's admin key)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "docs": [
+              "Set by `propose_admin`; becomes admin when it signs `accept_admin`. Default = none."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "approver",
+            "docs": [
+              "Backend key that must co-sign every `buy_pack`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "tree_funder",
+            "docs": [
+              "Backend key allowed to call `create_tree` (besides the admin). It only spends its own SOL."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Stops `buy_pack` and `admin_mint` for every expansion."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "booty_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "booty_destination",
+            "docs": [
+              "The shop wallet's $BOOTY token account."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "active_tree",
+            "docs": [
+              "Tree every mint goes into. Default = none yet."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "standby_tree",
+            "docs": [
+              "Spare tree, promoted by `rotate_tree` when the active tree is nearly full. Default = none."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "tree_max_depth",
+            "type": "u32"
+          },
+          {
+            "name": "tree_max_buffer",
+            "type": "u32"
+          },
+          {
+            "name": "tree_canopy_depth",
+            "type": "u32"
+          },
+          {
+            "name": "trees_created",
+            "type": "u32"
+          },
+          {
+            "name": "next_expansion_id",
+            "type": "u16"
+          },
+          {
+            "name": "packs_sold",
+            "type": "u64"
+          },
+          {
+            "name": "cards_minted",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "mint_authority_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Expansion",
+      "docs": [
+        "One card expansion (First Crush = 1). PDA [\"expansion\", id as u16 LE]."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "id",
+            "type": "u16"
+          },
+          {
+            "name": "paused",
+            "docs": [
+              "Stops `buy_pack` and `admin_mint` for this expansion. New expansions start paused."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "collection_mint",
+            "docs": [
+              "Token Metadata collection the cards join (First Crush: CARDZ...)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "docs": [
+              "Royalty creator (unverified, 100% share)."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "royalty_bps",
+            "type": "u16"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri_prefix",
+            "docs": [
+              "Shared start of every card URI; each card stores the rest."
+            ],
+            "type": "string"
+          },
+          {
+            "name": "pack_size",
+            "type": "u8"
+          },
+          {
+            "name": "weights_regular",
+            "docs": [
+              "Rarity weights for every slot except the last."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "weights_guaranteed",
+            "docs": [
+              "Rarity weights for the last slot (the guarantee, e.g. Rare or better)."
+            ],
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "price",
+            "docs": [
+              "Normal price in raw $BOOTY units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "discount_price",
+            "docs": [
+              "One discount period at a time: `discount_price` applies when discount_start <= now < discount_end."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "discount_start",
+            "type": "i64"
+          },
+          {
+            "name": "discount_end",
+            "type": "i64"
+          },
+          {
+            "name": "sale_start",
+            "docs": [
+              "Sale period for `buy_pack`; 0 = no limit on that side."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "sale_end",
+            "type": "i64"
+          },
+          {
+            "name": "packs_sold",
+            "type": "u64"
+          },
+          {
+            "name": "cards_minted",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ExpansionParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "collection_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "royalty_bps",
+            "type": "u16"
+          },
+          {
+            "name": "symbol",
+            "type": "string"
+          },
+          {
+            "name": "uri_prefix",
+            "type": "string"
+          },
+          {
+            "name": "pack_size",
+            "type": "u8"
+          },
+          {
+            "name": "weights_regular",
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "weights_guaranteed",
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "sale_start",
+            "type": "i64"
+          },
+          {
+            "name": "sale_end",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackMinted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "expansion_id",
+            "type": "u16"
+          },
+          {
+            "name": "order_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "tree",
+            "type": "pubkey"
+          },
+          {
+            "name": "first_leaf_index",
+            "docs": [
+              "Leaf index of the first card; card i has leaf index first_leaf_index + i."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "card_ids",
+            "type": {
+              "vec": "u16"
+            }
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "seed",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "TreeCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "tree",
+            "type": "pubkey"
+          },
+          {
+            "name": "as_active",
+            "type": "bool"
+          },
+          {
+            "name": "max_depth",
+            "type": "u32"
+          },
+          {
+            "name": "max_buffer",
+            "type": "u32"
+          },
+          {
+            "name": "canopy_depth",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TreeRotated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_tree",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_tree",
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}

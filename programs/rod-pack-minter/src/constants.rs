@@ -5,6 +5,8 @@ pub const CONFIG_SEED: &[u8] = b"config";
 pub const EXPANSION_SEED: &[u8] = b"expansion";
 pub const CARDS_SEED: &[u8] = b"cards";
 pub const MINT_AUTHORITY_SEED: &[u8] = b"mint_authority";
+pub const VAULT_SEED: &[u8] = b"vault";
+pub const PACK_SEED: &[u8] = b"pack";
 
 // External programs (same addresses on mainnet, devnet and Surfpool)
 pub const BUBBLEGUM_ID: Pubkey = pubkey!("BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY");
@@ -32,4 +34,11 @@ pub const MAX_URI_LEN: usize = 200;
 pub const MAX_URI_PREFIX_LEN: usize = 128;
 pub const MAX_URI_SUFFIX_LEN: usize = 72;
 pub const MAX_EXPANSION_NAME_LEN: usize = 32;
+/// Cards per expansion. The table is read in place (not deserialised), so its size does not touch the heap.
 pub const MAX_CARDS: usize = 400;
+
+/// Bounds for `set_tree_size` (account compression supports depth 3..=30).
+pub const MIN_TREE_DEPTH: u32 = 3;
+pub const MAX_TREE_DEPTH: u32 = 30;
+/// Upper bound for the per-purchase lamport deposits, so a mistyped fee cannot overcharge players.
+pub const MAX_FEE_LAMPORTS: u64 = 10_000_000;

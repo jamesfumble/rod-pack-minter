@@ -104,15 +104,45 @@ pub fn set_owned(svm: &mut LiteSVM, address: Pubkey, owner: Pubkey, data: Vec<u8
     svm.set_account(address, Account { lamports, data, owner, executable: false, rent_epoch: 0 }).unwrap();
 }
 
-/// SlotHashes with one entry, so buy_pack has a slot hash to read.
-pub fn set_slot_hash(svm: &mut LiteSVM, slot: u64, hash: [u8; 32]) {
-    let mut d = Vec::with_capacity(48);
-    d.extend_from_slice(&1u64.to_le_bytes());
-    d.extend_from_slice(&slot.to_le_bytes());
-    d.extend_from_slice(&hash);
+/// SlotHashes with the given (slot, hash) entries, newest first.
+pub fn set_slot_hashes(svm: &mut LiteSVM, entries: &[(u64, [u8; 32])]) {
+    let mut d = Vec::with_capacity(8 + entries.len() * 40);
+    d.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+    for (slot, hash) in entries {
+        d.extend_from_slice(&slot.to_le_bytes());
+        d.extend_from_slice(hash);
+    }
     let sysvar_owner = anchor_lang::pubkey!("Sysvar1111111111111111111111111111111111111");
     set_owned(svm, SLOT_HASHES_ID, sysvar_owner, d);
 }
+
+/// The test chain's "hash" of a slot.
+pub fn slot_hash_of(slot: u64) -> [u8; 32] {
+    solana_sha256_hasher::hashv(&[b"test slot", &slot.to_le_bytes()]).to_bytes()
+}
+
+pub fn current_slot(svm: &LiteSVM) -> u64 {
+    svm.get_sysvar::<anchor_lang::prelude::Clock>().slot
+}
+
+/// Moves to `slot` and fills SlotHashes with the 512 slots before it (as the runtime would).
+pub fn warp(svm: &mut LiteSVM, slot: u64) {
+    svm.warp_to_slot(slot);
+    let entries: Vec<(u64, [u8; 32])> = (1..=512u64).filter(|d| *d <= slot).map(|d| (slot - d, slot_hash_of(slot - d))).collect();
+    set_slot_hashes(svm, &entries);
+}
+
+pub fn pending_pda(player: &Pubkey, order_id: &[u8; 16]) -> Pubkey {
+    pda(&[PACK_SEED, player.as_ref(), order_id], &rod_pack_minter::ID)
+}
+
+pub fn vault_pda(mint: &Pubkey) -> Pubkey {
+    pda(&[VAULT_SEED, mint.as_ref()], &rod_pack_minter::ID)
+}
+
+pub const OPEN_FEE: u64 = 20_000;
+pub const SEAL_FEE: u64 = 5_000;
+pub const REFUND_AFTER: i64 = 86_400;
 
 pub fn compute_limit_ix(units: u32) -> Instruction {
     let mut data = vec![2u8];
@@ -144,6 +174,8 @@ pub fn assert_err<T>(res: Result<T, String>, needle: &str) {
 
 pub struct Env {
     pub svm: LiteSVM,
+    pub opener: Keypair,
+    pub next_order: u64,
     pub admin: Keypair,
     pub approver: Keypair,
     pub funder: Keypair,
@@ -198,7 +230,7 @@ impl Env {
         pd.data[13..45].copy_from_slice(admin.pubkey().as_ref());
         svm.set_account(programdata, pd).unwrap();
 
-        set_slot_hash(&mut svm, 1000, [42u8; 32]);
+        warp(&mut svm, 1000);
 
         // $BOOTY (9 decimals): player holds 10,000, shop wallet account starts at 0.
         let booty_mint = Pubkey::new_unique();
@@ -208,8 +240,12 @@ impl Env {
         let shop_token = Pubkey::new_unique();
         set_owned(&mut svm, shop_token, TOKEN_PROGRAM, token_account_data(&booty_mint, &Pubkey::new_unique(), 0));
 
+        let opener = Keypair::new();
+        svm.airdrop(&opener.pubkey(), 1_000_000_000).unwrap();
         let mut env = Env {
             svm,
+            opener,
+            next_order: 1,
             admin,
             approver,
             funder,
@@ -304,11 +340,16 @@ impl Env {
         Instruction::new_with_bytes(
             rod_pack_minter::ID,
             &rod_pack_minter::instruction::Initialize {
-                approver: self.approver.pubkey(),
-                tree_funder: self.funder.pubkey(),
-                tree_max_depth: depth,
-                tree_max_buffer: buffer,
-                tree_canopy_depth: canopy,
+                params: rod_pack_minter::InitParams {
+                    approver: self.approver.pubkey(),
+                    tree_funder: self.funder.pubkey(),
+                    tree_max_depth: depth,
+                    tree_max_buffer: buffer,
+                    tree_canopy_depth: canopy,
+                    open_fee_lamports: OPEN_FEE,
+                    seal_fee_lamports: SEAL_FEE,
+                    refund_after_secs: REFUND_AFTER,
+                },
             }
             .data(),
             rod_pack_minter::accounts::Initialize {
@@ -319,6 +360,8 @@ impl Env {
                 program_data: programdata,
                 booty_mint: self.booty_mint,
                 booty_destination: self.shop_token,
+                vault: vault_pda(&self.booty_mint),
+                token_program: TOKEN_PROGRAM,
                 system_program: system_program::ID,
             }
             .to_account_metas(None),
@@ -483,8 +526,15 @@ impl Env {
         }
     }
 
+    pub fn new_order(&mut self) -> [u8; 16] {
+        let mut o = [0u8; 16];
+        o[..8].copy_from_slice(b"order-00");
+        o[8..].copy_from_slice(&self.next_order.to_le_bytes());
+        self.next_order += 1;
+        o
+    }
+
     pub fn buy_ix(&self, id: u16, order_id: [u8; 16], max_price: u64, approver: &Pubkey) -> Instruction {
-        let tree = self.config().active_tree;
         Instruction::new_with_bytes(
             rod_pack_minter::ID,
             &rod_pack_minter::instruction::BuyPack { expansion_id: id, order_id, max_price }.data(),
@@ -494,13 +544,12 @@ impl Env {
                 config: config_pda(),
                 expansion: expansion_pda(id),
                 card_table: cards_pda(id),
+                pending_pack: pending_pda(&self.player.pubkey(), &order_id),
                 player_token: self.player_token,
-                booty_destination: self.shop_token,
+                vault: vault_pda(&self.booty_mint),
                 booty_mint: self.booty_mint,
                 token_program: TOKEN_PROGRAM,
-                mint: self.mint_accounts(&tree),
-                slot_hashes: SLOT_HASHES_ID,
-                instructions: INSTRUCTIONS_SYSVAR,
+                system_program: system_program::ID,
                 event_authority: event_authority_pda(),
                 program: rod_pack_minter::ID,
             }
@@ -508,11 +557,113 @@ impl Env {
         )
     }
 
-    /// [compute limit, buy_pack] signed by the player and the approver.
-    pub fn buy(&mut self, id: u16, max_price: u64) -> Result<TransactionMetadata, String> {
-        let ix = self.buy_ix(id, *b"order-0000000001", max_price, &self.approver.pubkey());
+    /// buy_pack signed by the player and the approver. Returns the order id.
+    pub fn buy(&mut self, id: u16, max_price: u64) -> Result<[u8; 16], String> {
+        let order = self.new_order();
+        let ix = self.buy_ix(id, order, max_price, &self.approver.pubkey());
         let (player, approver) = (self.player.insecure_clone(), self.approver.insecure_clone());
-        send(&mut self.svm, &[compute_limit_ix(1_400_000), ix], &player, &[&approver])
+        send(&mut self.svm, &[ix], &player, &[&approver]).map(|_| order)
+    }
+
+    pub fn open_ix(&self, opener: &Pubkey, order_id: &[u8; 16], player: &Pubkey, expansion_id: u16) -> Instruction {
+        let tree = self.config().active_tree;
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::OpenPack {}.data(),
+            rod_pack_minter::accounts::OpenPack {
+                opener: *opener,
+                config: config_pda(),
+                pending_pack: pending_pda(player, order_id),
+                player: *player,
+                expansion: expansion_pda(expansion_id),
+                card_table: cards_pda(expansion_id),
+                vault: vault_pda(&self.booty_mint),
+                booty_destination: self.shop_token,
+                booty_mint: self.booty_mint,
+                token_program: TOKEN_PROGRAM,
+                mint: self.mint_accounts(&tree),
+                slot_hashes: SLOT_HASHES_ID,
+                event_authority: event_authority_pda(),
+                program: rod_pack_minter::ID,
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    /// open_pack sent by the backend's opener key, with a compute limit.
+    pub fn open(&mut self, order_id: &[u8; 16], expansion_id: u16) -> Result<TransactionMetadata, String> {
+        let opener = self.opener.insecure_clone();
+        self.open_by(&opener, order_id, expansion_id)
+    }
+
+    pub fn open_by(&mut self, opener: &Keypair, order_id: &[u8; 16], expansion_id: u16) -> Result<TransactionMetadata, String> {
+        let ix = self.open_ix(&opener.pubkey(), order_id, &self.player.pubkey(), expansion_id);
+        send(&mut self.svm, &[compute_limit_ix(1_400_000), ix], opener, &[])
+    }
+
+    /// Moves one slot forward (the purchase slot is complete) and opens.
+    pub fn next_slot_and_open(&mut self, order_id: &[u8; 16], expansion_id: u16) -> Result<TransactionMetadata, String> {
+        let s = current_slot(&self.svm);
+        warp(&mut self.svm, s + 1);
+        self.open(order_id, expansion_id)
+    }
+
+    /// buy_pack, then open_pack one slot later.
+    pub fn buy_and_open(&mut self, id: u16, max_price: u64) -> Result<TransactionMetadata, String> {
+        let order = self.buy(id, max_price)?;
+        self.next_slot_and_open(&order, id)
+    }
+
+    pub fn seal_ix(&self, sealer: &Pubkey, order_id: &[u8; 16]) -> Instruction {
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::SealPack {}.data(),
+            rod_pack_minter::accounts::SealPack {
+                sealer: *sealer,
+                pending_pack: pending_pda(&self.player.pubkey(), order_id),
+                slot_hashes: SLOT_HASHES_ID,
+                event_authority: event_authority_pda(),
+                program: rod_pack_minter::ID,
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    pub fn refund_ix(&self, order_id: &[u8; 16]) -> Instruction {
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::RefundPack {}.data(),
+            rod_pack_minter::accounts::RefundPack {
+                player: self.player.pubkey(),
+                config: config_pda(),
+                pending_pack: pending_pda(&self.player.pubkey(), order_id),
+                vault: vault_pda(&self.booty_mint),
+                player_token: self.player_token,
+                booty_mint: self.booty_mint,
+                token_program: TOKEN_PROGRAM,
+                event_authority: event_authority_pda(),
+                program: rod_pack_minter::ID,
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    pub fn pending(&self, order_id: &[u8; 16]) -> Option<rod_pack_minter::PendingPack> {
+        let a = self.svm.get_account(&pending_pda(&self.player.pubkey(), order_id))?;
+        if a.data.is_empty() {
+            return None;
+        }
+        Some(anchor_lang::AccountDeserialize::try_deserialize(&mut a.data.as_slice()).unwrap())
+    }
+
+    pub fn set_time(&mut self, unix_timestamp: i64) {
+        let mut clock = self.svm.get_sysvar::<anchor_lang::prelude::Clock>();
+        clock.unix_timestamp = unix_timestamp;
+        self.svm.set_sysvar(&clock);
+    }
+
+    pub fn now(&self) -> i64 {
+        self.svm.get_sysvar::<anchor_lang::prelude::Clock>().unix_timestamp
     }
 
     pub fn admin_mint_ix(&self, signer: &Pubkey, id: u16, card_id: u16, count: u8, recipient: &Pubkey) -> Instruction {

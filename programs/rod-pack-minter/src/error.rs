@@ -68,4 +68,28 @@ pub enum ErrorCode {
     BadSlotHashes,
     #[msg("Arithmetic overflow")]
     Overflow,
+    #[msg("The pack can be opened from the slot after its purchase")]
+    TooEarlyToOpen,
+    #[msg("The pack is already sealed")]
+    AlreadySealed,
+    #[msg("The purchase slot's hash is no longer in SlotHashes; use the fallback (open after expiry)")]
+    SlotHashUnavailable,
+    #[msg("The refund period has not started")]
+    TooEarlyToRefund,
+    #[msg("Wrong player for this pack")]
+    WrongPlayer,
+    #[msg("Wrong vault")]
+    WrongVault,
+    #[msg("Fee too high")]
+    FeeTooHigh,
+    #[msg("Packs are pending; open or refund them first")]
+    PacksPending,
+    #[msg("The config is already migrated")]
+    AlreadyMigrated,
+    #[msg("Token mints with extensions are not supported")]
+    MintHasExtensions,
+    #[msg("Cannot change the collection after cards were minted")]
+    CollectionLocked,
+    #[msg("A discount needs a price above 0")]
+    ZeroDiscount,
 }

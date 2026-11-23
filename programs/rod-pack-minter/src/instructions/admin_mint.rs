@@ -31,7 +31,7 @@ pub fn handle_admin_mint(ctx: Context<AdminMint>, expansion_id: u16, card_id: u1
     require!(!config.paused, ErrorCode::ProgramPaused);
     require!(!expansion.paused, ErrorCode::ExpansionPaused);
     require!(count >= 1 && count <= MAX_ADMIN_MINT, ErrorCode::BadCount);
-    require!((card_id as usize) < ctx.accounts.card_table.cards.len(), ErrorCode::BadCardId);
+    require!(card_id < ctx.accounts.card_table.count, ErrorCode::BadCardId);
 
     let view = ctx.accounts.mint.prepare(config, expansion, count as u64)?;
     let card_ids = vec![card_id; count as usize];

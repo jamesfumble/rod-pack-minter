@@ -1,54 +1,198 @@
-mod common;
+﻿mod common;
 
 use anchor_lang::{
     prelude::{Clock, Pubkey},
     solana_program::instruction::{AccountMeta, Instruction},
-    solana_program::{system_instruction, system_program},
-    InstructionData,
+    solana_program::system_program,
+    InstructionData, ToAccountMetas,
 };
 use common::*;
-use rod_pack_minter::{bubblegum, constants::*};
+use rod_pack_minter::{
+    bubblegum,
+    constants::*,
+    draw::{draw_pack, pack_seed},
+    fallback_hash,
+};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 
-#[test]
-fn buy_pack_pays_and_mints_six_cards() {
-    let (mut env, id, tree) = Env::ready();
-    let before_player = token_amount(&env.svm, &env.player_token);
-    let sol_before = env.svm.get_balance(&env.player.pubkey()).unwrap();
-    let meta = env.buy(id, 150 * BOOTY).expect("buy_pack");
-    let sol_spent = sol_before - env.svm.get_balance(&env.player.pubkey()).unwrap();
-    println!("player SOL spent on the pack: {sol_spent} lamports (fees for 2 signatures = 10000)");
-    assert_eq!(sol_spent, 10_000, "the player pays only the signature fees (no priority fee in this test)");
-    println!("buy_pack (6 cards) compute units: {}", meta.compute_units_consumed);
-
-    assert_eq!(token_amount(&env.svm, &env.player_token), before_player - 150 * BOOTY);
-    assert_eq!(token_amount(&env.svm, &env.shop_token), 150 * BOOTY);
-    assert_eq!(env.num_minted(&tree), 6);
-
-    let ev = pack_event(&meta);
-    assert_eq!(ev.expansion_id, id);
-    assert_eq!(ev.player, env.player.pubkey());
-    assert_eq!(ev.tree, tree);
-    assert_eq!(ev.first_leaf_index, 0);
-    assert_eq!(ev.card_ids.len(), 6);
-    assert_eq!(ev.price, 150 * BOOTY);
-    // card ids 0-21 Common, 22-43 Rare, 44-65 Epic: the last card is Rare or Epic
-    assert!(ev.card_ids[5] >= 22, "guaranteed slot drew card {}", ev.card_ids[5]);
-    println!("cards: {:?}", ev.card_ids);
-
-    let c = env.config();
-    assert_eq!((c.packs_sold, c.cards_minted), (1, 6));
+/// The cards a pack must contain, recomputed off chain from public data (what anyone can verify).
+fn expected_cards(env: &Env, slot_hash: &[u8; 32], order: &[u8; 16], purchase_slot: u64, id: u16) -> Vec<u16> {
+    let seed = pack_seed(slot_hash, order, &env.player.pubkey().to_bytes(), purchase_slot, id);
     let e = env.expansion(id);
-    assert_eq!((e.packs_sold, e.cards_minted), (1, 6));
+    // Test cards: ids 0-21 Common, 22-43 Rare, 44-65 Epic.
+    let picks = draw_pack(&seed, e.pack_size, &e.weights_regular, &e.weights_guaranteed, &[22, 22, 22, 0]).unwrap();
+    picks.into_iter().map(|(r, i)| r as u16 * 22 + i).collect()
+}
 
-    // A second pack continues in the same tree, with different cards (new slot hash and leaf count).
-    set_slot_hash(&mut env.svm, 1001, [43u8; 32]);
-    let meta2 = env.buy(id, 150 * BOOTY).expect("second buy_pack");
-    let ev2 = pack_event(&meta2);
-    assert_eq!(ev2.first_leaf_index, 6);
-    assert_ne!(ev2.seed, ev.seed);
-    assert_eq!(env.num_minted(&tree), 12);
+#[test]
+fn purchase_then_open_and_the_player_pays_every_fee() {
+    let (mut env, id, tree) = Env::ready();
+    let player = env.player.pubkey();
+    let opener = env.opener.pubkey();
+    let booty_before = token_amount(&env.svm, &env.player_token);
+    let sol_before = env.svm.get_balance(&player).unwrap();
+
+    let order = env.buy(id, 150 * BOOTY).expect("buy_pack");
+    let purchase_slot = current_slot(&env.svm);
+    let pending = env.pending(&order).expect("pending pack");
+    assert_eq!((pending.price, pending.pack_size, pending.purchase_slot, pending.sealed), (150 * BOOTY, 6, purchase_slot, false));
+    assert_eq!(token_amount(&env.svm, &env.player_token), booty_before - 150 * BOOTY);
+    assert_eq!(token_amount(&env.svm, &vault_pda(&env.booty_mint)), 150 * BOOTY, "price held in the vault");
+    assert_eq!(token_amount(&env.svm, &env.shop_token), 0);
+    assert_eq!(env.num_minted(&tree), 0, "nothing minted yet");
+    assert_eq!(env.config().pending_packs, 1);
+
+    // The cards do not exist yet: opening in the purchase slot fails.
+    assert_err(env.open(&order, id), "TooEarlyToOpen");
+
+    let opener_before = env.svm.get_balance(&opener).unwrap();
+    let meta = env.next_slot_and_open(&order, id).expect("open_pack");
+    println!("open_pack (6 cards) compute units: {}", meta.compute_units_consumed);
+
+    assert_eq!(env.num_minted(&tree), 6);
+    assert_eq!(token_amount(&env.svm, &vault_pda(&env.booty_mint)), 0);
+    assert_eq!(token_amount(&env.svm, &env.shop_token), 150 * BOOTY, "price released to the shop");
+    assert!(env.pending(&order).is_none(), "pending pack closed");
+    let ev = pack_event(&meta);
+    assert_eq!(ev.card_ids, expected_cards(&env, &slot_hash_of(purchase_slot), &order, purchase_slot, id));
+    assert!(ev.card_ids[5] >= 22, "guaranteed slot drew card {}", ev.card_ids[5]);
+    assert_eq!((ev.player, ev.tree, ev.first_leaf_index, ev.price), (player, tree, 0, 150 * BOOTY));
+    let c = env.config();
+    assert_eq!((c.packs_sold, c.cards_minted, c.pending_packs), (1, 6, 0));
+
+    // Fees: the player paid the buy transaction (2 signatures) plus the opener's deposit; the PendingPack rent came back.
+    let player_spent = sol_before - env.svm.get_balance(&player).unwrap();
+    assert_eq!(player_spent, 10_000 + OPEN_FEE + SEAL_FEE);
+    // The opener paid its 5,000-lamport fee and was repaid the deposit: it ends up ahead, not out of pocket.
+    let opener_net = env.svm.get_balance(&opener).unwrap() as i64 - opener_before as i64;
+    assert_eq!(opener_net, (OPEN_FEE + SEAL_FEE) as i64 - 5_000);
+    println!("player paid {player_spent} lamports in total; opener net +{opener_net}");
+}
+
+#[test]
+fn the_cards_do_not_depend_on_who_opens_or_when() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let purchase_slot = current_slot(&env.svm);
+    // Opened 200 slots later by a stranger: same cards as recomputed from the purchase slot.
+    warp(&mut env.svm, purchase_slot + 200);
+    let stranger = Keypair::new();
+    env.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    let meta = env.open_by(&stranger, &order, id).expect("anyone may open");
+    assert_eq!(pack_event(&meta).card_ids, expected_cards(&env, &slot_hash_of(purchase_slot), &order, purchase_slot, id));
+}
+
+#[test]
+fn the_player_can_open_their_own_pack() {
+    let (mut env, id, tree) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let s = current_slot(&env.svm);
+    warp(&mut env.svm, s + 1);
+    let player = env.player.insecure_clone();
+    env.open_by(&player, &order, id).expect("player opens");
+    assert_eq!(env.num_minted(&tree), 6);
+}
+
+#[test]
+fn a_sealed_pack_keeps_its_cards_after_slot_hashes_expire() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let purchase_slot = current_slot(&env.svm);
+    warp(&mut env.svm, purchase_slot + 1);
+    let sealer = Keypair::new();
+    env.svm.airdrop(&sealer.pubkey(), 1_000_000_000).unwrap();
+    let before = env.svm.get_balance(&sealer.pubkey()).unwrap();
+    let ix = env.seal_ix(&sealer.pubkey(), &order);
+    send(&mut env.svm, &[ix], &sealer, &[]).expect("seal_pack");
+    assert_eq!(env.svm.get_balance(&sealer.pubkey()).unwrap() - before + 5_000, SEAL_FEE, "sealer repaid from the deposit");
+    let ix = env.seal_ix(&sealer.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &sealer, &[]), "AlreadySealed");
+
+    warp(&mut env.svm, purchase_slot + 2000); // far past the 512-slot window
+    let meta = env.open(&order, id).expect("open a sealed pack later");
+    assert_eq!(pack_event(&meta).card_ids, expected_cards(&env, &slot_hash_of(purchase_slot), &order, purchase_slot, id));
+}
+
+#[test]
+fn an_unsealed_pack_past_the_window_uses_the_fallback() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let purchase_slot = current_slot(&env.svm);
+    warp(&mut env.svm, purchase_slot + 600);
+    let meta = env.open(&order, id).expect("open after expiry");
+    let fb = fallback_hash(&pending_pda(&env.player.pubkey(), &order), purchase_slot);
+    assert_eq!(pack_event(&meta).card_ids, expected_cards(&env, &fb, &order, purchase_slot, id));
+}
+
+#[test]
+fn refund_only_after_the_delay_and_only_for_the_player() {
+    let (mut env, id, _) = Env::ready();
+    let booty_before = token_amount(&env.svm, &env.player_token);
+    let sol_before = env.svm.get_balance(&env.player.pubkey()).unwrap();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let player = env.player.insecure_clone();
+
+    let ix = env.refund_ix(&order);
+    assert_err(send(&mut env.svm, &[ix], &player, &[]), "TooEarlyToRefund");
+
+    // Somebody else cannot take it, even after the delay.
+    let now = env.now();
+    env.set_time(now + REFUND_AFTER);
+    let thief = Keypair::new();
+    env.svm.airdrop(&thief.pubkey(), 1_000_000_000).unwrap();
+    let mut ix = env.refund_ix(&order);
+    ix.accounts[0].pubkey = thief.pubkey();
+    assert!(send(&mut env.svm, &[ix], &thief, &[]).is_err(), "only the player may refund");
+
+    let ix = env.refund_ix(&order);
+    send(&mut env.svm, &[ix], &player, &[]).expect("refund");
+    assert_eq!(token_amount(&env.svm, &env.player_token), booty_before, "price back");
+    assert!(env.pending(&order).is_none());
+    // Only transaction fees are lost (buy, the early refund attempt, the refund); rent and the deposit came back.
+    assert_eq!(sol_before - env.svm.get_balance(&env.player.pubkey()).unwrap(), 10_000 + 5_000 + 5_000);
+    let c = env.config();
+    assert_eq!((c.pending_packs, c.packs_refunded), (0, 1));
+    // A refunded pack can no longer be opened.
+    let s = current_slot(&env.svm);
+    warp(&mut env.svm, s + 1);
+    assert!(env.open(&order, id).is_err());
+}
+
+#[test]
+fn a_pack_opens_once() {
+    let (mut env, id, tree) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    env.next_slot_and_open(&order, id).unwrap();
+    assert!(env.open(&order, id).is_err());
+    assert_eq!(env.num_minted(&tree), 6);
+}
+
+#[test]
+fn an_order_id_cannot_be_reused() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.new_order();
+    let ix = env.buy_ix(id, order, 150 * BOOTY, &env.approver.pubkey());
+    let (player, approver) = (env.player.insecure_clone(), env.approver.insecure_clone());
+    send(&mut env.svm, &[ix.clone()], &player, &[&approver]).unwrap();
+    assert_err(send(&mut env.svm, &[ix], &player, &[&approver]), "already in use");
+}
+
+#[test]
+fn cards_go_to_the_buyer_only() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let s = current_slot(&env.svm);
+    warp(&mut env.svm, s + 1);
+    let mut ix = env.open_ix(&env.opener.pubkey(), &order, &env.player.pubkey(), id);
+    let thief = Pubkey::new_unique();
+    for m in ix.accounts.iter_mut() {
+        if m.pubkey == env.player.pubkey() {
+            m.pubkey = thief;
+        }
+    }
+    let opener = env.opener.insecure_clone();
+    assert_err(send(&mut env.svm, &[compute_limit_ix(1_400_000), ix], &opener, &[]), "WrongPlayer");
 }
 
 #[test]
@@ -58,35 +202,81 @@ fn ten_card_pack_fits_in_compute() {
     p.pack_size = MAX_PACK_SIZE;
     let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::UpdateExpansion { expansion_id: id, params: p }.data());
     env.run_admin(ix).unwrap();
-    let meta = env.buy(id, 150 * BOOTY).expect("buy 10-card pack");
-    println!("buy_pack (10 cards) compute units: {}", meta.compute_units_consumed);
+    let meta = env.buy_and_open(id, 150 * BOOTY).expect("10-card pack");
+    println!("open_pack (10 cards) compute units: {}", meta.compute_units_consumed);
     assert!(meta.compute_units_consumed < 1_200_000);
     assert_eq!(pack_event(&meta).card_ids.len(), 10);
 }
 
 #[test]
-fn transaction_fits_with_a_lookup_table() {
+fn a_full_size_card_table_fits_in_the_default_heap() {
+    // MAX_CARDS (400) cards with maximum-length text (name 32, URI 128 + 72), opened without a heap request.
+    let (mut env, _, _) = Env::ready();
+    let mut p = env.first_crush_params();
+    p.name = "Max Size".into();
+    p.uri_prefix = "h".repeat(MAX_URI_PREFIX_LEN);
+    p.pack_size = MAX_PACK_SIZE;
+    let id = 2u16;
+    let ix = Instruction::new_with_bytes(
+        rod_pack_minter::ID,
+        &rod_pack_minter::instruction::AddExpansion { params: p, price: BOOTY }.data(),
+        rod_pack_minter::accounts::AddExpansion {
+            admin: env.admin.pubkey(),
+            config: config_pda(),
+            expansion: expansion_pda(id),
+            card_table: cards_pda(id),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    env.run_admin(ix).unwrap();
+    for start in (0..MAX_CARDS).step_by(5) {
+        let cards: Vec<rod_pack_minter::CardInput> = (start..start + 5)
+            .map(|i| rod_pack_minter::CardInput { rarity: (i % 3) as u8, name: format!("{i:0>32}"), uri_suffix: format!("{i:0>72}") })
+            .collect();
+        let ix = env.upsert_ix(&env.admin.pubkey(), id, start as u16, cards);
+        env.run_admin(ix).expect("upsert");
+    }
+    let card = rod_pack_minter::CardInput { rarity: 0, name: "one too many".into(), uri_suffix: "x".into() };
+    let ix = env.upsert_ix(&env.admin.pubkey(), id, MAX_CARDS as u16, vec![card]);
+    assert_err(env.run_admin(ix), "TooManyCards");
+    let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::SetExpansionPaused { expansion_id: id, paused: false }.data());
+    env.run_admin(ix).unwrap();
+    let meta = env.buy_and_open(id, BOOTY).expect("open with a full card table");
+    println!("open_pack (10 cards, 400-card table, max text) compute units: {}", meta.compute_units_consumed);
+}
+
+#[test]
+fn transactions_fit_with_a_lookup_table() {
     use solana_message::{v0, AddressLookupTableAccount, VersionedMessage};
-    let (env, id, _) = Env::ready();
-    let buy = env.buy_ix(id, *b"order-0000000001", 150 * BOOTY, &env.approver.pubkey());
-    let rotate = env.rotate_ix();
+    let (mut env, id, _) = Env::ready();
+    let order = env.new_order();
+    let buy = env.buy_ix(id, order, 150 * BOOTY, &env.approver.pubkey());
+    let open = env.open_ix(&env.opener.pubkey(), &order, &env.player.pubkey(), id);
     let mut price = vec![3u8];
     price.extend_from_slice(&250_000u64.to_le_bytes());
-    let ixs = [compute_limit_ix(600_000), Instruction { program_id: COMPUTE_BUDGET_ID, accounts: vec![], data: price }, rotate, buy.clone()];
-    // Everything except the two signers and the player's own token account goes into the lookup table.
-    let mut table: Vec<Pubkey> = Vec::new();
-    for ix in &ixs {
-        for m in ix.accounts.iter().map(|m| m.pubkey).chain(std::iter::once(ix.program_id)) {
-            if m != env.player.pubkey() && m != env.approver.pubkey() && m != env.player_token && !table.contains(&m) {
-                table.push(m);
+    let cb = [compute_limit_ix(600_000), Instruction { program_id: COMPUTE_BUDGET_ID, accounts: vec![], data: price }];
+    let signers = [env.player.pubkey(), env.approver.pubkey(), env.opener.pubkey(), env.player_token];
+    for (name, payer, ixs) in [
+        ("buy_pack", env.player.pubkey(), vec![cb[0].clone(), cb[1].clone(), buy]),
+        ("rotate_tree + open_pack", env.opener.pubkey(), vec![cb[0].clone(), cb[1].clone(), env.rotate_ix(), open]),
+    ] {
+        let mut table: Vec<Pubkey> = Vec::new();
+        for ix in &ixs {
+            for m in ix.accounts.iter().map(|m| m.pubkey).chain(std::iter::once(ix.program_id)) {
+                if !signers.contains(&m) && !table.contains(&m) {
+                    table.push(m);
+                }
             }
         }
+        let alt = AddressLookupTableAccount { key: Pubkey::new_unique(), addresses: table.clone() };
+        let msg = v0::Message::try_compile(&payer, &ixs, &[alt], Default::default()).unwrap();
+        let sigs = msg.header.num_required_signatures as usize;
+        let bytes = VersionedMessage::V0(msg).serialize().len() + 1 + sigs * 64;
+        println!("{name}: {bytes} bytes");
+        assert!(bytes <= 1232);
     }
-    let alt = AddressLookupTableAccount { key: Pubkey::new_unique(), addresses: table.clone() };
-    let msg = v0::Message::try_compile(&env.player.pubkey(), &ixs, &[alt], Default::default()).unwrap();
-    let bytes = VersionedMessage::V0(msg).serialize().len() + 1 + 2 * 64;
-    println!("v0 transaction with rotate + buy_pack: {bytes} bytes ({} accounts in the lookup table)", table.len());
-    assert!(bytes <= 1232);
+    let _ = &mut env;
 }
 
 #[test]
@@ -100,27 +290,31 @@ fn only_the_upgrade_authority_can_initialize() {
     let c = env.config();
     assert_eq!(c.admin, env.admin.pubkey());
     assert!(c.paused, "starts paused");
+    assert_eq!(c.vault, vault_pda(&env.booty_mint));
 }
 
 #[test]
 fn buy_needs_the_approver() {
     let (mut env, id, _) = Env::ready();
     let fake = Keypair::new();
-    let ix = env.buy_ix(id, *b"order-0000000001", 150 * BOOTY, &fake.pubkey());
+    let order = env.new_order();
+    let ix = env.buy_ix(id, order, 150 * BOOTY, &fake.pubkey());
     let player = env.player.insecure_clone();
     assert_err(send(&mut env.svm, &[ix], &player, &[&fake]), "WrongApprover");
-    // A player cannot co-sign as the approver themselves either.
-    let ix = env.buy_ix(id, *b"order-0000000001", 150 * BOOTY, &env.player.pubkey());
+    let ix = env.buy_ix(id, order, 150 * BOOTY, &env.player.pubkey());
     assert_err(send(&mut env.svm, &[ix], &player, &[]), "WrongApprover");
 }
 
 #[test]
-fn pause_stops_sales_and_admin_mints() {
-    let (mut env, id, _) = Env::ready();
+fn pause_stops_sales_and_admin_mints_but_paid_packs_still_open() {
+    let (mut env, id, tree) = Env::ready();
+    let paid = env.buy(id, 150 * BOOTY).unwrap();
     env.set_paused(true).unwrap();
     assert_err(env.buy(id, 150 * BOOTY), "ProgramPaused");
     let ix = env.admin_mint_ix(&env.admin.pubkey(), id, 3, 1, &Pubkey::new_unique());
     assert_err(env.run_admin(ix), "ProgramPaused");
+    env.next_slot_and_open(&paid, id).expect("a paid pack opens while paused");
+    assert_eq!(env.num_minted(&tree), 6);
     env.set_paused(false).unwrap();
 
     let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::SetExpansionPaused { expansion_id: id, paused: true }.data());
@@ -134,36 +328,20 @@ fn pause_stops_sales_and_admin_mints() {
 fn price_limit_and_discount() {
     let (mut env, id, _) = Env::ready();
     assert_err(env.buy(id, 149 * BOOTY), "PriceAboveMax");
-
     let now = env.svm.get_sysvar::<Clock>().unix_timestamp;
-    let ix = env.expansion_admin_ix(
-        id,
-        rod_pack_minter::instruction::SetPrice {
-            expansion_id: id,
-            price: 150 * BOOTY,
-            discount_price: 100 * BOOTY,
-            discount_start: now - 10,
-            discount_end: now + 3600,
-        }
-        .data(),
-    );
+    let set = |env: &Env, discount_price: u64, start: i64, end: i64| {
+        env.expansion_admin_ix(
+            id,
+            rod_pack_minter::instruction::SetPrice { expansion_id: id, price: 150 * BOOTY, discount_price, discount_start: start, discount_end: end }.data(),
+        )
+    };
+    let ix = set(&env, 0, now - 10, now + 3600);
+    assert_err(env.run_admin(ix), "ZeroDiscount");
+    let ix = set(&env, 100 * BOOTY, now - 10, now + 3600);
     env.run_admin(ix).unwrap();
-    let meta = env.buy(id, 100 * BOOTY).expect("discounted buy");
-    assert_eq!(pack_event(&meta).price, 100 * BOOTY);
-    assert_eq!(token_amount(&env.svm, &env.shop_token), 100 * BOOTY);
-
-    // A discount period in the past no longer applies.
-    let ix = env.expansion_admin_ix(
-        id,
-        rod_pack_minter::instruction::SetPrice {
-            expansion_id: id,
-            price: 150 * BOOTY,
-            discount_price: 100 * BOOTY,
-            discount_start: now - 7200,
-            discount_end: now - 3600,
-        }
-        .data(),
-    );
+    let order = env.buy(id, 100 * BOOTY).expect("discounted buy");
+    assert_eq!(env.pending(&order).unwrap().price, 100 * BOOTY);
+    let ix = set(&env, 100 * BOOTY, now - 7200, now - 3600);
     env.run_admin(ix).unwrap();
     assert_err(env.buy(id, 100 * BOOTY), "PriceAboveMax");
 }
@@ -180,41 +358,20 @@ fn sale_period_is_enforced() {
 }
 
 #[test]
-fn nothing_may_follow_buy_pack_except_compute_budget() {
-    let (mut env, id, tree) = Env::ready();
-    let buy = env.buy_ix(id, *b"order-0000000001", 150 * BOOTY, &env.approver.pubkey());
-    let (player, approver) = (env.player.insecure_clone(), env.approver.insecure_clone());
-
-    // A trailing transfer (stand-in for a "check the cards and fail" instruction) is rejected.
-    let tail = system_instruction::transfer(&player.pubkey(), &Pubkey::new_unique(), 1_000_000);
-    assert_err(send(&mut env.svm, &[buy.clone(), tail.clone()], &player, &[&approver]), "ForbiddenFollowingInstruction");
-    assert_eq!(env.num_minted(&tree), 0, "nothing minted");
-    assert_eq!(token_amount(&env.svm, &env.shop_token), 0, "nothing paid");
-
-    // Instructions before it are fine, and compute-budget instructions after it are fine.
-    send(&mut env.svm, &[tail, buy, compute_limit_ix(1_400_000)], &player, &[&approver]).expect("allowed layout");
-    assert_eq!(env.num_minted(&tree), 6);
-}
-
-#[test]
 fn admin_mint_picks_a_card_and_only_the_admin_can() {
     let (mut env, id, tree) = Env::ready();
     let friend = Pubkey::new_unique();
     let ix = env.admin_mint_ix(&env.admin.pubkey(), id, 50, 3, &friend);
-    // More than the default 200k CU per transaction: callers set a compute limit, as for buy_pack.
     let admin = env.admin.insecure_clone();
     let meta = send(&mut env.svm, &[compute_limit_ix(600_000), ix], &admin, &[]).expect("admin_mint");
     println!("admin_mint (3 cards) compute units: {}", meta.compute_units_consumed);
     assert_eq!(env.num_minted(&tree), 3);
 
-    let intruder = Keypair::new();
-    env.svm.airdrop(&intruder.pubkey(), 10_000_000_000).unwrap();
-    let ix = env.admin_mint_ix(&intruder.pubkey(), id, 50, 1, &intruder.pubkey());
-    assert_err(send(&mut env.svm, &[ix], &intruder, &[]), "Unauthorized");
-    // The approver key cannot either.
-    let approver = env.approver.insecure_clone();
-    let ix = env.admin_mint_ix(&approver.pubkey(), id, 50, 1, &approver.pubkey());
-    assert_err(send(&mut env.svm, &[ix], &approver, &[]), "Unauthorized");
+    for k in [Keypair::new(), env.approver.insecure_clone(), env.opener.insecure_clone()] {
+        env.svm.airdrop(&k.pubkey(), 10_000_000_000).unwrap();
+        let ix = env.admin_mint_ix(&k.pubkey(), id, 50, 1, &k.pubkey());
+        assert_err(send(&mut env.svm, &[compute_limit_ix(600_000), ix], &k, &[]), "Unauthorized");
+    }
     assert_eq!(env.num_minted(&tree), 3);
 }
 
@@ -226,60 +383,128 @@ fn only_the_admin_changes_settings_and_cards() {
     let card = rod_pack_minter::CardInput { rarity: 2, name: "Fake".into(), uri_suffix: "fake.json".into() };
     let ix = env.upsert_ix(&intruder.pubkey(), id, 0, vec![card]);
     assert_err(send(&mut env.svm, &[ix], &intruder, &[]), "Unauthorized");
-
-    let ix = Instruction::new_with_bytes(
-        rod_pack_minter::ID,
-        &rod_pack_minter::instruction::SetApprover { approver: intruder.pubkey() }.data(),
-        anchor_lang::ToAccountMetas::to_account_metas(
-            &rod_pack_minter::accounts::AdminOnly { admin: intruder.pubkey(), config: config_pda() },
-            None,
-        ),
-    );
-    assert_err(send(&mut env.svm, &[ix], &intruder, &[]), "Unauthorized");
+    for data in [
+        rod_pack_minter::instruction::SetApprover { approver: intruder.pubkey() }.data(),
+        rod_pack_minter::instruction::SetFees { open_fee_lamports: 0, seal_fee_lamports: 0, refund_after_secs: 600 }.data(),
+        rod_pack_minter::instruction::SetPaused { paused: true }.data(),
+    ] {
+        let ix = Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &data,
+            rod_pack_minter::accounts::AdminOnly { admin: intruder.pubkey(), config: config_pda() }.to_account_metas(None),
+        );
+        assert_err(send(&mut env.svm, &[ix], &intruder, &[]), "Unauthorized");
+    }
     assert_eq!(env.config().approver, env.approver.pubkey());
+}
+
+#[test]
+fn admin_safeguards() {
+    let (mut env, id, _) = Env::ready();
+    // Tree sizes outside what account compression supports.
+    for (d, b, c) in [(2, 8, 0), (31, 64, 8), (14, 63, 8), (14, 64, 14)] {
+        let ix = env.admin_ix(rod_pack_minter::instruction::SetTreeSize { max_depth: d, max_buffer: b, canopy_depth: c }.data());
+        assert_err(env.run_admin(ix), "BadTreeAccount");
+    }
+    // Fees capped, refund delay at least 10 minutes.
+    let ix = env.admin_ix(rod_pack_minter::instruction::SetFees { open_fee_lamports: MAX_FEE_LAMPORTS + 1, seal_fee_lamports: 0, refund_after_secs: 600 }.data());
+    assert_err(env.run_admin(ix), "FeeTooHigh");
+    let ix = env.admin_ix(rod_pack_minter::instruction::SetFees { open_fee_lamports: 0, seal_fee_lamports: 0, refund_after_secs: 60 }.data());
+    assert_err(env.run_admin(ix), "TooEarlyToRefund");
+    // The collection is locked once cards exist.
+    env.buy_and_open(id, 150 * BOOTY).unwrap();
+    let mut p = env.first_crush_params();
+    p.collection_mint = Pubkey::new_unique();
+    let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::UpdateExpansion { expansion_id: id, params: p }.data());
+    assert_err(env.run_admin(ix), "CollectionLocked");
+}
+
+#[test]
+fn payment_switch_waits_for_pending_packs() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let set_payment = |env: &Env| {
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::SetPayment {}.data(),
+            rod_pack_minter::accounts::SetPayment {
+                admin: env.admin.pubkey(),
+                config: config_pda(),
+                booty_mint: env.booty_mint,
+                booty_destination: env.shop_token,
+                vault: vault_pda(&env.booty_mint),
+            }
+            .to_account_metas(None),
+        )
+    };
+    let ix = set_payment(&env);
+    assert_err(env.run_admin(ix), "PacksPending");
+    env.next_slot_and_open(&order, id).unwrap();
+    let ix = set_payment(&env);
+    env.run_admin(ix).expect("no pending packs");
+}
+
+#[test]
+fn migrate_config_extends_a_v1_config() {
+    let (mut env, _, _) = Env::ready();
+    // Turn the config back into a v1 account (the layout devnet was first initialised with).
+    let mut acc = env.svm.get_account(&config_pda()).unwrap();
+    acc.data.truncate(rod_pack_minter::Config::V1_LEN);
+    env.svm.set_account(config_pda(), acc).unwrap();
+    let migrate = |env: &Env, admin: &Pubkey| {
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::MigrateConfig { open_fee_lamports: 7, seal_fee_lamports: 8, refund_after_secs: 3600 }.data(),
+            rod_pack_minter::accounts::MigrateConfig { admin: *admin, config: config_pda(), system_program: system_program::ID }.to_account_metas(None),
+        )
+    };
+    let intruder = Keypair::new();
+    env.svm.airdrop(&intruder.pubkey(), 1_000_000_000).unwrap();
+    let ix = migrate(&env, &intruder.pubkey());
+    assert_err(send(&mut env.svm, &[ix], &intruder, &[]), "Unauthorized");
+    let ix = migrate(&env, &env.admin.pubkey());
+    env.run_admin(ix).expect("migrate");
+    let c = env.config();
+    assert_eq!((c.open_fee_lamports, c.seal_fee_lamports, c.refund_after_secs, c.vault), (7, 8, 3600, Pubkey::default()));
+    assert_eq!(c.admin, env.admin.pubkey(), "v1 fields kept");
+    let ix = migrate(&env, &env.admin.pubkey());
+    assert_err(env.run_admin(ix), "AlreadyMigrated");
 }
 
 #[test]
 fn trees_are_made_by_admin_or_funder_and_rotate_when_full() {
     // Depth 3 = 8 leaves: one 6-card pack fits, a second does not.
     let (mut env, id, first) = Env::ready_with(Env::with_tree_size(3, 8, 0));
-    env.buy(id, 150 * BOOTY).expect("first pack");
-    set_slot_hash(&mut env.svm, 1001, [9u8; 32]);
-    assert_err(env.buy(id, 150 * BOOTY), "TreeFull");
-    assert_eq!(token_amount(&env.svm, &env.shop_token), 150 * BOOTY, "the failed pack charged nothing");
+    env.buy_and_open(id, 150 * BOOTY).expect("first pack");
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    assert_err(env.next_slot_and_open(&order, id), "TreeFull");
+    assert!(env.pending(&order).is_some(), "the paid pack waits; nothing lost");
 
     let rotate = env.rotate_ix();
     let admin = env.admin.insecure_clone();
     assert_err(send(&mut env.svm, &[rotate], &admin, &[]), "NoStandbyTree");
-
     let intruder = Keypair::new();
     env.svm.airdrop(&intruder.pubkey(), 10_000_000_000).unwrap();
     assert_err(env.create_tree(&intruder), "Unauthorized");
-
     let funder = env.funder.insecure_clone();
     let standby = env.create_tree(&funder).expect("funder creates the standby tree");
-    assert_eq!(env.config().standby_tree, standby);
     assert_err(env.create_tree(&funder), "StandbyExists");
 
-    // Anyone may rotate once the active tree is too full; the backend puts it in front of buy_pack.
+    // The backend puts rotate_tree in front of open_pack.
     let rotate = env.rotate_ix();
-    let player = env.player.insecure_clone();
-    let approver = env.approver.insecure_clone();
-    let mut buy = env.buy_ix(id, *b"order-0000000002", 150 * BOOTY, &env.approver.pubkey());
-    // buy_ix read the old active tree; point it at the standby tree, which rotate_tree promotes first.
-    for m in buy.accounts.iter_mut() {
+    let mut open = env.open_ix(&env.opener.pubkey(), &order, &env.player.pubkey(), id);
+    for m in open.accounts.iter_mut() {
         if m.pubkey == first {
             m.pubkey = standby;
         } else if m.pubkey == bubblegum::tree_config_address(&first) {
             m.pubkey = bubblegum::tree_config_address(&standby);
         }
     }
-    send(&mut env.svm, &[compute_limit_ix(1_400_000), rotate, buy], &player, &[&approver]).expect("rotate + buy");
+    let opener = env.opener.insecure_clone();
+    send(&mut env.svm, &[compute_limit_ix(1_400_000), rotate, open], &opener, &[]).expect("rotate + open");
     let c = env.config();
-    assert_eq!(c.active_tree, standby);
-    assert_eq!(c.standby_tree, Pubkey::default());
+    assert_eq!((c.active_tree, c.standby_tree, c.trees_created), (standby, Pubkey::default(), 2));
     assert_eq!(env.num_minted(&standby), 6);
-    assert_eq!(c.trees_created, 2);
 }
 
 #[test]
@@ -294,8 +519,7 @@ fn rotate_refuses_while_the_active_tree_has_room() {
 #[test]
 fn nobody_can_mint_into_a_program_tree_directly() {
     let (mut env, _, tree) = Env::ready();
-    // Even the collection's update authority (who can verify cards into the collection) cannot use the tree:
-    // its creator and delegate is the program's PDA.
+    // Even the collection's update authority cannot use the tree: its creator and delegate is the program's PDA.
     let owner = env.collection_owner.insecure_clone();
     let mut data = vec![153, 18, 178, 47, 197, 158, 86, 15];
     data.extend(bubblegum::metadata_args("Fake Epic", "", "https://x/fake.json", 0, &env.collection_mint, &owner.pubkey()));
@@ -321,8 +545,6 @@ fn nobody_can_mint_into_a_program_tree_directly() {
         ],
         data,
     };
-    let res = send(&mut env.svm, &[ix], &owner, &[]);
-    assert!(res.is_err(), "direct mint must fail");
-    println!("direct Bubblegum mint rejected: {}", res.unwrap_err().lines().find(|l| l.contains("Error")).unwrap_or(""));
+    assert!(send(&mut env.svm, &[ix], &owner, &[]).is_err(), "direct mint must fail");
     assert_eq!(env.num_minted(&tree), 0);
 }

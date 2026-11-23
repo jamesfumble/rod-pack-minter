@@ -1,15 +1,16 @@
 //! The pack draw. Pure functions, so they are unit-tested on the host and give the same result on chain.
 //!
-//! Seed = sha256(newest SlotHashes hash | order_id | player | tree | num_minted | expansion_id). The slot hash belongs to
-//! the slot before the one executing the transaction, so nobody knows it when the player signs. Anyone can recompute a
+//! Seed = sha256(hash of the purchase slot | order_id | player | purchase slot | expansion_id). The purchase slot's
+//! hash only exists after that slot is complete, when the purchase (and its payment) can no longer be undone. It does
+//! not depend on who opens the pack, when, or on the tree, so nobody can steer it afterwards. Anyone can recompute a
 //! pack from the emitted seed.
 
 use solana_sha256_hasher::hashv;
 
 use crate::constants::RARITY_COUNT;
 
-pub fn pack_seed(slot_hash: &[u8; 32], order_id: &[u8; 16], player: &[u8; 32], tree: &[u8; 32], num_minted: u64, expansion_id: u16) -> [u8; 32] {
-    hashv(&[slot_hash, order_id, player, tree, &num_minted.to_le_bytes(), &expansion_id.to_le_bytes()]).to_bytes()
+pub fn pack_seed(slot_hash: &[u8; 32], order_id: &[u8; 16], player: &[u8; 32], purchase_slot: u64, expansion_id: u16) -> [u8; 32] {
+    hashv(&[slot_hash, order_id, player, &purchase_slot.to_le_bytes(), &expansion_id.to_le_bytes()]).to_bytes()
 }
 
 /// Weights with rarities that have no cards set to 0.

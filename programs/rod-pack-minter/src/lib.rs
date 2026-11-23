@@ -1,6 +1,8 @@
-//! rod_pack_minter: sells card packs for Reign of Desire expansions. One `buy_pack` transaction takes the $BOOTY price
-//! and mints the whole pack as Bubblegum v1 cNFTs into the expansion's collection; if any step fails, nothing happens.
-//! Cards are drawn on chain when the transaction runs. Only `admin_mint` (admin-signed) can choose a card.
+//! rod_pack_minter: sells card packs for Reign of Desire expansions as Bubblegum v1 cNFTs.
+//! A purchase has two steps. `buy_pack` (player + backend approver) moves the $BOOTY price into the program's vault.
+//! `open_pack` (anyone, normally the backend a moment later) draws the cards from the purchase slot's hash, mints them,
+//! and releases the price to the shop. A pack nobody opens can be refunded by the player after `refund_after_secs`.
+//! The player pays every fee: the opener is repaid from the player's deposit. Only `admin_mint` can choose a card.
 
 pub mod bubblegum;
 pub mod constants;
@@ -21,15 +23,17 @@ declare_id!("RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN");
 pub mod rod_pack_minter {
     use super::*;
 
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        approver: Pubkey,
-        tree_funder: Pubkey,
-        tree_max_depth: u32,
-        tree_max_buffer: u32,
-        tree_canopy_depth: u32,
-    ) -> Result<()> {
-        instructions::initialize::handle_initialize(ctx, approver, tree_funder, tree_max_depth, tree_max_buffer, tree_canopy_depth)
+    pub fn initialize(ctx: Context<Initialize>, params: InitParams) -> Result<()> {
+        instructions::initialize::handle_initialize(ctx, params)
+    }
+    pub fn migrate_config(ctx: Context<MigrateConfig>, open_fee_lamports: u64, seal_fee_lamports: u64, refund_after_secs: i64) -> Result<()> {
+        instructions::admin::handle_migrate_config(ctx, open_fee_lamports, seal_fee_lamports, refund_after_secs)
+    }
+    pub fn init_vault(ctx: Context<InitVault>) -> Result<()> {
+        instructions::admin::handle_init_vault(ctx)
+    }
+    pub fn set_fees(ctx: Context<AdminOnly>, open_fee_lamports: u64, seal_fee_lamports: u64, refund_after_secs: i64) -> Result<()> {
+        instructions::admin::handle_set_fees(ctx, open_fee_lamports, seal_fee_lamports, refund_after_secs)
     }
 
     // Admin: whole program
@@ -87,9 +91,18 @@ pub mod rod_pack_minter {
         instructions::tree::handle_rotate_tree(ctx)
     }
 
-    // Minting
+    // Purchases
     pub fn buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 16], max_price: u64) -> Result<()> {
         instructions::buy_pack::handle_buy_pack(ctx, expansion_id, order_id, max_price)
+    }
+    pub fn open_pack(ctx: Context<OpenPack>) -> Result<()> {
+        instructions::open_pack::handle_open_pack(ctx)
+    }
+    pub fn seal_pack(ctx: Context<SealPack>) -> Result<()> {
+        instructions::seal::handle_seal_pack(ctx)
+    }
+    pub fn refund_pack(ctx: Context<RefundPack>) -> Result<()> {
+        instructions::refund::handle_refund_pack(ctx)
     }
     pub fn admin_mint(ctx: Context<AdminMint>, expansion_id: u16, card_id: u16, count: u8) -> Result<()> {
         instructions::admin_mint::handle_admin_mint(ctx, expansion_id, card_id, count)

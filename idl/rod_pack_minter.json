@@ -336,7 +336,8 @@
         {
           "name": "player",
           "docs": [
-            "Pays the price and the fees, and receives the cards."
+            "Pays the price, the transaction fee, the PendingPack rent (returned when the pack is opened or refunded) and",
+            "the opener's fee deposit."
           ],
           "writable": true,
           "signer": true
@@ -344,7 +345,7 @@
         {
           "name": "approver",
           "docs": [
-            "The backend's approver key: it signs last and sends the transaction, so a player cannot wrap the purchase."
+            "The backend's approver key: every purchase goes through the game's order flow."
           ],
           "signer": true
         },
@@ -369,7 +370,6 @@
         },
         {
           "name": "expansion",
-          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -415,6 +415,31 @@
           }
         },
         {
+          "name": "pending_pack",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  99,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              },
+              {
+                "kind": "arg",
+                "path": "order_id"
+              }
+            ]
+          }
+        },
+        {
           "name": "player_token",
           "docs": [
             "The player's $BOOTY account (transfer_checked enforces owner and mint)."
@@ -422,7 +447,7 @@
           "writable": true
         },
         {
-          "name": "booty_destination",
+          "name": "vault",
           "writable": true
         },
         {
@@ -432,64 +457,8 @@
           "name": "token_program"
         },
         {
-          "name": "mint",
-          "accounts": [
-            {
-              "name": "mint_authority"
-            },
-            {
-              "name": "tree_config",
-              "writable": true
-            },
-            {
-              "name": "merkle_tree",
-              "writable": true
-            },
-            {
-              "name": "collection_mint"
-            },
-            {
-              "name": "collection_metadata",
-              "writable": true
-            },
-            {
-              "name": "collection_edition"
-            },
-            {
-              "name": "collection_authority_record"
-            },
-            {
-              "name": "bubblegum_signer"
-            },
-            {
-              "name": "log_wrapper",
-              "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
-            },
-            {
-              "name": "compression_program",
-              "address": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK"
-            },
-            {
-              "name": "token_metadata_program",
-              "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-            },
-            {
-              "name": "bubblegum_program",
-              "address": "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY"
-            },
-            {
-              "name": "system_program",
-              "address": "11111111111111111111111111111111"
-            }
-          ]
-        },
-        {
-          "name": "slot_hashes",
-          "address": "SysvarS1otHashes111111111111111111111111111"
-        },
-        {
-          "name": "instructions",
-          "address": "Sysvar1nstructions1111111111111111111111111"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         },
         {
           "name": "event_authority"
@@ -618,6 +587,80 @@
       "args": []
     },
     {
+      "name": "init_vault",
+      "discriminator": [
+        77,
+        79,
+        85,
+        150,
+        33,
+        217,
+        52,
+        106
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "booty_mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "booty_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize",
       "discriminator": [
         175,
@@ -694,32 +737,303 @@
           "name": "booty_destination"
         },
         {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "booty_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
-          "name": "approver",
-          "type": "pubkey"
-        },
-        {
-          "name": "tree_funder",
-          "type": "pubkey"
-        },
-        {
-          "name": "tree_max_depth",
-          "type": "u32"
-        },
-        {
-          "name": "tree_max_buffer",
-          "type": "u32"
-        },
-        {
-          "name": "tree_canopy_depth",
-          "type": "u32"
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "InitParams"
+            }
+          }
         }
       ]
+    },
+    {
+      "name": "migrate_config",
+      "discriminator": [
+        92,
+        131,
+        58,
+        105,
+        210,
+        154,
+        224,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "open_fee_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "seal_fee_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "refund_after_secs",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "open_pack",
+      "discriminator": [
+        75,
+        203,
+        144,
+        65,
+        63,
+        253,
+        103,
+        85
+      ],
+      "accounts": [
+        {
+          "name": "opener",
+          "docs": [
+            "Sends the transaction and receives the player's fee deposit. Also the Bubblegum payer (which pays nothing)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending_pack",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  99,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pending_pack.player",
+                "account": "PendingPack"
+              },
+              {
+                "kind": "account",
+                "path": "pending_pack.order_id",
+                "account": "PendingPack"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player",
+          "docs": [
+            "Receives the cards and the PendingPack's rent."
+          ],
+          "writable": true
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pending_pack.expansion_id",
+                "account": "PendingPack"
+              }
+            ]
+          }
+        },
+        {
+          "name": "card_table",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  114,
+                  100,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pending_pack.expansion_id",
+                "account": "PendingPack"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "booty_destination",
+          "writable": true
+        },
+        {
+          "name": "booty_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "mint",
+          "accounts": [
+            {
+              "name": "mint_authority"
+            },
+            {
+              "name": "tree_config",
+              "writable": true
+            },
+            {
+              "name": "merkle_tree",
+              "writable": true
+            },
+            {
+              "name": "collection_mint"
+            },
+            {
+              "name": "collection_metadata",
+              "writable": true
+            },
+            {
+              "name": "collection_edition"
+            },
+            {
+              "name": "collection_authority_record"
+            },
+            {
+              "name": "bubblegum_signer"
+            },
+            {
+              "name": "log_wrapper",
+              "address": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+            },
+            {
+              "name": "compression_program",
+              "address": "cmtDvXumGCrqC1Age74AVPhSRVXJMd8PJS91L8KbNCK"
+            },
+            {
+              "name": "token_metadata_program",
+              "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+            },
+            {
+              "name": "bubblegum_program",
+              "address": "BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY"
+            },
+            {
+              "name": "system_program",
+              "address": "11111111111111111111111111111111"
+            }
+          ]
+        },
+        {
+          "name": "slot_hashes"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "propose_admin",
@@ -769,6 +1083,98 @@
       ]
     },
     {
+      "name": "refund_pack",
+      "discriminator": [
+        108,
+        93,
+        170,
+        157,
+        72,
+        116,
+        157,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "pending_pack"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending_pack",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  99,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              },
+              {
+                "kind": "account",
+                "path": "pending_pack.order_id",
+                "account": "PendingPack"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "player_token",
+          "docs": [
+            "The player's $BOOTY account (any account of the mint the player chooses)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "booty_mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "rotate_tree",
       "discriminator": [
         41,
@@ -802,6 +1208,63 @@
         },
         {
           "name": "active_tree_config"
+        },
+        {
+          "name": "event_authority"
+        },
+        {
+          "name": "program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "seal_pack",
+      "discriminator": [
+        10,
+        66,
+        240,
+        63,
+        155,
+        17,
+        253,
+        160
+      ],
+      "accounts": [
+        {
+          "name": "sealer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pending_pack",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  99,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pending_pack.player",
+                "account": "PendingPack"
+              },
+              {
+                "kind": "account",
+                "path": "pending_pack.order_id",
+                "account": "PendingPack"
+              }
+            ]
+          }
+        },
+        {
+          "name": "slot_hashes"
         },
         {
           "name": "event_authority"
@@ -936,6 +1399,61 @@
       ]
     },
     {
+      "name": "set_fees",
+      "discriminator": [
+        137,
+        178,
+        49,
+        58,
+        0,
+        245,
+        242,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "open_fee_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "seal_fee_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "refund_after_secs",
+          "type": "i64"
+        }
+      ]
+    },
+    {
       "name": "set_paused",
       "discriminator": [
         91,
@@ -1026,6 +1544,27 @@
         },
         {
           "name": "booty_destination"
+        },
+        {
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "booty_mint"
+              }
+            ]
+          }
         }
       ],
       "args": []
@@ -1452,6 +1991,19 @@
         255,
         20
       ]
+    },
+    {
+      "name": "PendingPack",
+      "discriminator": [
+        177,
+        250,
+        82,
+        43,
+        166,
+        196,
+        93,
+        142
+      ]
     }
   ],
   "events": [
@@ -1469,6 +2021,19 @@
       ]
     },
     {
+      "name": "PackBought",
+      "discriminator": [
+        220,
+        208,
+        74,
+        75,
+        42,
+        144,
+        231,
+        69
+      ]
+    },
+    {
       "name": "PackMinted",
       "discriminator": [
         170,
@@ -1479,6 +2044,32 @@
         240,
         82,
         110
+      ]
+    },
+    {
+      "name": "PackRefunded",
+      "discriminator": [
+        8,
+        128,
+        247,
+        205,
+        55,
+        245,
+        103,
+        87
+      ]
+    },
+    {
+      "name": "PackSealed",
+      "discriminator": [
+        114,
+        252,
+        159,
+        97,
+        49,
+        27,
+        62,
+        235
       ]
     },
     {
@@ -1673,6 +2264,66 @@
       "code": 6032,
       "name": "Overflow",
       "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6033,
+      "name": "TooEarlyToOpen",
+      "msg": "The pack can be opened from the slot after its purchase"
+    },
+    {
+      "code": 6034,
+      "name": "AlreadySealed",
+      "msg": "The pack is already sealed"
+    },
+    {
+      "code": 6035,
+      "name": "SlotHashUnavailable",
+      "msg": "The purchase slot's hash is no longer in SlotHashes; use the fallback (open after expiry)"
+    },
+    {
+      "code": 6036,
+      "name": "TooEarlyToRefund",
+      "msg": "The refund period has not started"
+    },
+    {
+      "code": 6037,
+      "name": "WrongPlayer",
+      "msg": "Wrong player for this pack"
+    },
+    {
+      "code": 6038,
+      "name": "WrongVault",
+      "msg": "Wrong vault"
+    },
+    {
+      "code": 6039,
+      "name": "FeeTooHigh",
+      "msg": "Fee too high"
+    },
+    {
+      "code": 6040,
+      "name": "PacksPending",
+      "msg": "Packs are pending; open or refund them first"
+    },
+    {
+      "code": 6041,
+      "name": "AlreadyMigrated",
+      "msg": "The config is already migrated"
+    },
+    {
+      "code": 6042,
+      "name": "MintHasExtensions",
+      "msg": "Token mints with extensions are not supported"
+    },
+    {
+      "code": 6043,
+      "name": "CollectionLocked",
+      "msg": "Cannot change the collection after cards were minted"
+    },
+    {
+      "code": 6044,
+      "name": "ZeroDiscount",
+      "msg": "A discount needs a price above 0"
     }
   ],
   "types": [
@@ -1709,26 +2360,6 @@
       }
     },
     {
-      "name": "CardEntry",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "rarity",
-            "type": "u8"
-          },
-          {
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "name": "uri_suffix",
-            "type": "string"
-          }
-        ]
-      }
-    },
-    {
       "name": "CardInput",
       "type": {
         "kind": "struct",
@@ -1751,7 +2382,9 @@
     {
       "name": "CardTable",
       "docs": [
-        "The cards of one expansion. PDA [\"cards\", expansion id as u16 LE]. Grows with `upsert_cards`."
+        "The cards of one expansion. PDA [\"cards\", expansion id as u16 LE]. Only this small header is (de)serialised by",
+        "Anchor; the cards follow it as fixed-size entries read and written in place, so even a full table never has to",
+        "fit in the 32 KiB heap. Entry: rarity u8 | name_len u8 | name [u8; 32] | suffix_len u8 | uri_suffix [u8; 72]."
       ],
       "type": {
         "kind": "struct",
@@ -1765,14 +2398,8 @@
             "type": "u8"
           },
           {
-            "name": "cards",
-            "type": {
-              "vec": {
-                "defined": {
-                  "name": "CardEntry"
-                }
-              }
-            }
+            "name": "count",
+            "type": "u16"
           }
         ]
       }
@@ -1816,7 +2443,7 @@
           {
             "name": "paused",
             "docs": [
-              "Stops `buy_pack` and `admin_mint` for every expansion."
+              "Stops `buy_pack` and `admin_mint` for every expansion (already paid packs can still be opened)."
             ],
             "type": "bool"
           },
@@ -1880,6 +2507,56 @@
           {
             "name": "mint_authority_bump",
             "type": "u8"
+          },
+          {
+            "name": "vault",
+            "docs": [
+              "Program-owned $BOOTY token account (PDA [\"vault\", booty_mint], authority = config) that holds a pack's price",
+              "between `buy_pack` and `open_pack` / `refund_pack`."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "open_fee_lamports",
+            "docs": [
+              "Lamports the player deposits with every purchase; `open_pack` pays them to whoever sends it, so the opener's",
+              "transaction fee is covered by the player."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "seal_fee_lamports",
+            "docs": [
+              "Lamports the player deposits for a separate `seal_pack` (only needed when opening is delayed); paid to the sealer."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "refund_after_secs",
+            "docs": [
+              "Seconds after purchase from which the player may take an unopened pack's price back."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "pending_packs",
+            "docs": [
+              "Purchases not yet opened or refunded."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "packs_refunded",
+            "type": "u64"
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }
@@ -2075,6 +2752,83 @@
       }
     },
     {
+      "name": "InitParams",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "approver",
+            "type": "pubkey"
+          },
+          {
+            "name": "tree_funder",
+            "type": "pubkey"
+          },
+          {
+            "name": "tree_max_depth",
+            "type": "u32"
+          },
+          {
+            "name": "tree_max_buffer",
+            "type": "u32"
+          },
+          {
+            "name": "tree_canopy_depth",
+            "type": "u32"
+          },
+          {
+            "name": "open_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "seal_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "refund_after_secs",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackBought",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "expansion_id",
+            "type": "u16"
+          },
+          {
+            "name": "order_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_pack",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "purchase_slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "PackMinted",
       "type": {
         "kind": "struct",
@@ -2125,6 +2879,146 @@
                 32
               ]
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackRefunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "expansion_id",
+            "type": "u16"
+          },
+          {
+            "name": "order_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PackSealed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pending_pack",
+            "type": "pubkey"
+          },
+          {
+            "name": "fallback",
+            "docs": [
+              "false: the purchase slot's hash was used; true: it had left SlotHashes and the fallback hash was used."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "slot_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PendingPack",
+      "docs": [
+        "A paid, not yet opened pack. PDA [\"pack\", player, order_id]. Closed by `open_pack` or `refund_pack`, which return",
+        "its rent to the player."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "expansion_id",
+            "type": "u16"
+          },
+          {
+            "name": "order_id",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          },
+          {
+            "name": "price",
+            "docs": [
+              "$BOOTY held in the vault for this pack."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "pack_size",
+            "type": "u8"
+          },
+          {
+            "name": "purchase_slot",
+            "docs": [
+              "Slot of the `buy_pack` transaction. The cards come from the hash of this slot, which does not exist until",
+              "the slot is complete (after the purchase is irreversible)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "purchased_at",
+            "type": "i64"
+          },
+          {
+            "name": "sealed",
+            "docs": [
+              "Set by `seal_pack` / `open_pack`: the hash the draw uses."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "slot_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "open_fee",
+            "docs": [
+              "The player's lamport deposit for the opener (and sealer), on top of the rent."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "seal_fee",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

@@ -4,6 +4,9 @@ pub mod buy_pack;
 pub mod expansion;
 pub mod initialize;
 pub mod mint;
+pub mod open_pack;
+pub mod refund;
+pub mod seal;
 pub mod tree;
 
 pub use admin::*;
@@ -12,4 +15,7 @@ pub use buy_pack::*;
 pub use expansion::*;
 pub use initialize::*;
 pub use mint::*;
+pub use open_pack::*;
+pub use refund::*;
+pub use seal::*;
 pub use tree::*;

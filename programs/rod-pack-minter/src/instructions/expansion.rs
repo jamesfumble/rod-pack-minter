@@ -4,7 +4,7 @@ use anchor_lang::system_program::{transfer, Transfer};
 use crate::{
     constants::*,
     error::ErrorCode,
-    state::{CardEntry, CardTable, Config, Expansion},
+    state::{write_card, CardTable, Config, Expansion},
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -58,7 +58,7 @@ pub struct AddExpansion<'info> {
     )]
     pub expansion: Account<'info, Expansion>,
     #[account(
-        init, payer = admin, space = CardTable::BASE_LEN,
+        init, payer = admin, space = CardTable::HEADER_LEN,
         seeds = [CARDS_SEED, config.next_expansion_id.to_le_bytes().as_ref()], bump
     )]
     pub card_table: Account<'info, CardTable>,
@@ -83,7 +83,7 @@ pub fn handle_add_expansion(ctx: Context<AddExpansion>, params: ExpansionParams,
     let t = &mut ctx.accounts.card_table;
     t.expansion_id = id;
     t.bump = ctx.bumps.card_table;
-    t.cards = Vec::new();
+    t.count = 0;
     ctx.accounts.config.next_expansion_id = id.checked_add(1).ok_or(ErrorCode::Overflow)?;
     Ok(())
 }
@@ -100,6 +100,9 @@ pub struct ExpansionAdmin<'info> {
 
 pub fn handle_update_expansion(ctx: Context<ExpansionAdmin>, _expansion_id: u16, params: ExpansionParams) -> Result<()> {
     validate(&params)?;
+    let e = &ctx.accounts.expansion;
+    // Cards already minted belong to the current collection; moving the expansion to another one would split it.
+    require!(params.collection_mint == e.collection_mint || e.cards_minted == 0, ErrorCode::CollectionLocked);
     apply(&mut ctx.accounts.expansion, params);
     Ok(())
 }
@@ -115,6 +118,7 @@ pub fn handle_set_price(
 ) -> Result<()> {
     let none = discount_start == 0 && discount_end == 0;
     require!(none || discount_end > discount_start, ErrorCode::BadDiscount);
+    require!(none || discount_price > 0, ErrorCode::ZeroDiscount);
     let e = &mut ctx.accounts.expansion;
     e.price = price;
     e.discount_price = if none { 0 } else { discount_price };
@@ -153,24 +157,18 @@ pub struct UpsertCards<'info> {
 /// the positions in the table and must stay stable, so cards are never removed.
 pub fn handle_upsert_cards(ctx: Context<UpsertCards>, _expansion_id: u16, start_index: u16, cards: Vec<CardInput>) -> Result<()> {
     let prefix_len = ctx.accounts.expansion.uri_prefix.len();
-    let table = &mut ctx.accounts.card_table;
     let start = start_index as usize;
-    require!(start <= table.cards.len(), ErrorCode::BadCardIndex);
+    let old_count = ctx.accounts.card_table.count as usize;
+    require!(start <= old_count, ErrorCode::BadCardIndex);
     require!(start + cards.len() <= MAX_CARDS, ErrorCode::TooManyCards);
-    for (i, c) in cards.into_iter().enumerate() {
+    for c in &cards {
         require!((c.rarity as usize) < RARITY_COUNT, ErrorCode::BadRarity);
         require!(!c.name.is_empty() && c.name.len() <= MAX_NAME_LEN, ErrorCode::TextTooLong);
         require!(c.uri_suffix.len() <= MAX_URI_SUFFIX_LEN && prefix_len + c.uri_suffix.len() <= MAX_URI_LEN, ErrorCode::TextTooLong);
-        let entry = CardEntry { rarity: c.rarity, name: c.name, uri_suffix: c.uri_suffix };
-        if start + i < table.cards.len() {
-            table.cards[start + i] = entry;
-        } else {
-            table.cards.push(entry);
-        }
     }
-
-    let new_len = table.serialized_len();
-    let info = table.to_account_info();
+    let new_count = old_count.max(start + cards.len());
+    let new_len = CardTable::len_for(new_count);
+    let info = ctx.accounts.card_table.to_account_info();
     if new_len > info.data_len() {
         let needed = Rent::get()?.minimum_balance(new_len).saturating_sub(info.lamports());
         if needed > 0 {
@@ -184,5 +182,13 @@ pub fn handle_upsert_cards(ctx: Context<UpsertCards>, _expansion_id: u16, start_
         }
         info.resize(new_len)?;
     }
+    {
+        let mut data = info.try_borrow_mut_data()?;
+        for (i, c) in cards.iter().enumerate() {
+            write_card(&mut data, start + i, c.rarity, c.name.as_bytes(), c.uri_suffix.as_bytes());
+        }
+    }
+    // Card ids are positions in the table and must stay stable, so cards are replaced or appended, never removed.
+    ctx.accounts.card_table.count = new_count as u16;
     Ok(())
 }

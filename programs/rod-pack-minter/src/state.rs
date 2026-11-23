@@ -14,7 +14,7 @@ pub struct Config {
     pub approver: Pubkey,
     /// Backend key allowed to call `create_tree` (besides the admin). It only spends its own SOL.
     pub tree_funder: Pubkey,
-    /// Stops `buy_pack` and `admin_mint` for every expansion.
+    /// Stops `buy_pack` and `admin_mint` for every expansion (already paid packs can still be opened).
     pub paused: bool,
     pub booty_mint: Pubkey,
     /// The shop wallet's $BOOTY token account.
@@ -32,6 +32,50 @@ pub struct Config {
     pub cards_minted: u64,
     pub bump: u8,
     pub mint_authority_bump: u8,
+    // ---- v2 (two-step purchase). Appended so `migrate_config` can extend a v1 account in place. ----
+    /// Program-owned $BOOTY token account (PDA ["vault", booty_mint], authority = config) that holds a pack's price
+    /// between `buy_pack` and `open_pack` / `refund_pack`.
+    pub vault: Pubkey,
+    /// Lamports the player deposits with every purchase; `open_pack` pays them to whoever sends it, so the opener's
+    /// transaction fee is covered by the player.
+    pub open_fee_lamports: u64,
+    /// Lamports the player deposits for a separate `seal_pack` (only needed when opening is delayed); paid to the sealer.
+    pub seal_fee_lamports: u64,
+    /// Seconds after purchase from which the player may take an unopened pack's price back.
+    pub refund_after_secs: i64,
+    /// Purchases not yet opened or refunded.
+    pub pending_packs: u64,
+    pub packs_refunded: u64,
+    pub _reserved: [u8; 64],
+}
+
+impl Config {
+    /// Size of the v1 account (before the two-step fields), for `migrate_config`.
+    pub const V1_LEN: usize = 8 + 32 * 8 + 1 + 4 * 4 + 2 + 8 + 8 + 1 + 1;
+}
+
+/// A paid, not yet opened pack. PDA ["pack", player, order_id]. Closed by `open_pack` or `refund_pack`, which return
+/// its rent to the player.
+#[account]
+#[derive(InitSpace)]
+pub struct PendingPack {
+    pub player: Pubkey,
+    pub expansion_id: u16,
+    pub order_id: [u8; 16],
+    /// $BOOTY held in the vault for this pack.
+    pub price: u64,
+    pub pack_size: u8,
+    /// Slot of the `buy_pack` transaction. The cards come from the hash of this slot, which does not exist until
+    /// the slot is complete (after the purchase is irreversible).
+    pub purchase_slot: u64,
+    pub purchased_at: i64,
+    /// Set by `seal_pack` / `open_pack`: the hash the draw uses.
+    pub sealed: bool,
+    pub slot_hash: [u8; 32],
+    /// The player's lamport deposit for the opener (and sealer), on top of the rent.
+    pub open_fee: u64,
+    pub seal_fee: u64,
+    pub bump: u8,
 }
 
 /// One card expansion (First Crush = 1). PDA ["expansion", id as u16 LE].
@@ -86,55 +130,94 @@ impl Expansion {
     }
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug, PartialEq, Eq)]
-pub struct CardEntry {
-    pub rarity: u8,
-    pub name: String,
-    pub uri_suffix: String,
-}
-
-impl CardEntry {
-    pub fn serialized_len(&self) -> usize {
-        1 + 4 + self.name.len() + 4 + self.uri_suffix.len()
-    }
-}
-
-/// The cards of one expansion. PDA ["cards", expansion id as u16 LE]. Grows with `upsert_cards`.
+/// The cards of one expansion. PDA ["cards", expansion id as u16 LE]. Only this small header is (de)serialised by
+/// Anchor; the cards follow it as fixed-size entries read and written in place, so even a full table never has to
+/// fit in the 32 KiB heap. Entry: rarity u8 | name_len u8 | name [u8; 32] | suffix_len u8 | uri_suffix [u8; 72].
 #[account]
 pub struct CardTable {
     pub expansion_id: u16,
     pub bump: u8,
-    pub cards: Vec<CardEntry>,
+    pub count: u16,
 }
 
 impl CardTable {
-    pub const BASE_LEN: usize = 8 + 2 + 1 + 4;
+    pub const HEADER_LEN: usize = 8 + 2 + 1 + 2;
+    pub const ENTRY_LEN: usize = 1 + 1 + MAX_NAME_LEN + 1 + MAX_URI_SUFFIX_LEN;
 
-    pub fn serialized_len(&self) -> usize {
-        Self::BASE_LEN + self.cards.iter().map(|c| c.serialized_len()).sum::<usize>()
+    pub fn len_for(count: usize) -> usize {
+        Self::HEADER_LEN + count * Self::ENTRY_LEN
     }
+}
 
-    pub fn rarity_counts(&self) -> [u16; RARITY_COUNT] {
-        let mut counts = [0u16; RARITY_COUNT];
-        for c in &self.cards {
-            counts[c.rarity as usize] += 1;
+/// One card, borrowed from the account data.
+pub struct CardRef<'a> {
+    pub rarity: u8,
+    pub name: &'a [u8],
+    pub uri_suffix: &'a [u8],
+}
+
+pub fn card_at(data: &[u8], id: usize) -> Option<CardRef<'_>> {
+    let o = CardTable::HEADER_LEN + id * CardTable::ENTRY_LEN;
+    let e = data.get(o..o + CardTable::ENTRY_LEN)?;
+    let name_len = (e[1] as usize).min(MAX_NAME_LEN);
+    let s = 2 + MAX_NAME_LEN;
+    let suffix_len = (e[s] as usize).min(MAX_URI_SUFFIX_LEN);
+    Some(CardRef { rarity: e[0], name: &e[2..2 + name_len], uri_suffix: &e[s + 1..s + 1 + suffix_len] })
+}
+
+pub fn write_card(data: &mut [u8], id: usize, rarity: u8, name: &[u8], uri_suffix: &[u8]) {
+    let o = CardTable::HEADER_LEN + id * CardTable::ENTRY_LEN;
+    let e = &mut data[o..o + CardTable::ENTRY_LEN];
+    e.fill(0);
+    e[0] = rarity;
+    e[1] = name.len() as u8;
+    e[2..2 + name.len()].copy_from_slice(name);
+    let s = 2 + MAX_NAME_LEN;
+    e[s] = uri_suffix.len() as u8;
+    e[s + 1..s + 1 + uri_suffix.len()].copy_from_slice(uri_suffix);
+}
+
+pub fn rarity_counts(data: &[u8], count: u16) -> [u16; RARITY_COUNT] {
+    let mut counts = [0u16; RARITY_COUNT];
+    for id in 0..count as usize {
+        let r = data[CardTable::HEADER_LEN + id * CardTable::ENTRY_LEN] as usize;
+        if r < RARITY_COUNT {
+            counts[r] += 1;
         }
-        counts
     }
+    counts
+}
 
-    /// Card id of the `index`-th card (0-based) with the given rarity.
-    pub fn nth_of_rarity(&self, rarity: u8, index: u16) -> Option<u16> {
-        let mut seen = 0u16;
-        for (id, c) in self.cards.iter().enumerate() {
-            if c.rarity == rarity {
-                if seen == index {
-                    return Some(id as u16);
-                }
-                seen += 1;
+/// Card id of the `index`-th card (0-based) with the given rarity.
+pub fn nth_of_rarity(data: &[u8], count: u16, rarity: u8, index: u16) -> Option<u16> {
+    let mut seen = 0u16;
+    for id in 0..count as usize {
+        if data[CardTable::HEADER_LEN + id * CardTable::ENTRY_LEN] == rarity {
+            if seen == index {
+                return Some(id as u16);
             }
+            seen += 1;
         }
-        None
     }
+    None
+}
+
+#[event]
+pub struct PackBought {
+    pub expansion_id: u16,
+    pub order_id: [u8; 16],
+    pub player: Pubkey,
+    pub pending_pack: Pubkey,
+    pub price: u64,
+    pub purchase_slot: u64,
+}
+
+#[event]
+pub struct PackSealed {
+    pub pending_pack: Pubkey,
+    /// false: the purchase slot's hash was used; true: it had left SlotHashes and the fallback hash was used.
+    pub fallback: bool,
+    pub slot_hash: [u8; 32],
 }
 
 #[event]
@@ -148,6 +231,14 @@ pub struct PackMinted {
     pub card_ids: Vec<u16>,
     pub price: u64,
     pub seed: [u8; 32],
+}
+
+#[event]
+pub struct PackRefunded {
+    pub expansion_id: u16,
+    pub order_id: [u8; 16],
+    pub player: Pubkey,
+    pub price: u64,
 }
 
 #[event]

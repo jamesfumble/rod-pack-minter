@@ -4,7 +4,7 @@ use crate::{
     bubblegum::{metadata_args, MintCpi, TreeConfigView},
     constants::*,
     error::ErrorCode,
-    state::{CardTable, Config, Expansion},
+    state::{card_at, CardTable, Config, Expansion},
 };
 
 /// The accounts every mint needs. Shared by `buy_pack` and `admin_mint`.
@@ -64,7 +64,7 @@ impl<'info> MintAccounts<'info> {
         &self,
         config: &Config,
         expansion: &Expansion,
-        table: &CardTable,
+        table: &Account<'info, CardTable>,
         leaf_owner: &AccountInfo<'info>,
         payer: &AccountInfo<'info>,
         card_ids: &[u16],
@@ -102,12 +102,20 @@ impl<'info> MintAccounts<'info> {
         let bump = [config.mint_authority_bump];
         let seeds: &[&[u8]] = &[MINT_AUTHORITY_SEED, &bump];
         let mut uri = String::with_capacity(MAX_URI_LEN);
+        let mut name = String::with_capacity(MAX_NAME_LEN);
         for id in card_ids {
-            let card = table.cards.get(*id as usize).ok_or(ErrorCode::BadCardId)?;
-            uri.clear();
-            uri.push_str(&expansion.uri_prefix);
-            uri.push_str(&card.uri_suffix);
-            let metadata = metadata_args(&card.name, &expansion.symbol, &uri, expansion.royalty_bps, &expansion.collection_mint, &expansion.creator);
+            require!(*id < table.count, ErrorCode::BadCardId);
+            {
+                let info = table.to_account_info();
+                let data = info.try_borrow_data()?;
+                let card = card_at(&data, *id as usize).ok_or(ErrorCode::BadCardId)?;
+                name.clear();
+                name.push_str(core::str::from_utf8(card.name).map_err(|_| error!(ErrorCode::TextTooLong))?);
+                uri.clear();
+                uri.push_str(&expansion.uri_prefix);
+                uri.push_str(core::str::from_utf8(card.uri_suffix).map_err(|_| error!(ErrorCode::TextTooLong))?);
+            }
+            let metadata = metadata_args(&name, &expansion.symbol, &uri, expansion.royalty_bps, &expansion.collection_mint, &expansion.creator);
             cpi.mint(&metadata, &[seeds])?;
         }
         Ok(())

@@ -20,3 +20,4 @@ id.json
 
 # Program binaries for tests: fetched by scripts/fetch-fixtures.ps1
 tests/fixtures/*.so
+deployments/surfnet.json

@@ -1,0 +1,1 @@
+{"name":"rod-pack-minter-scripts","private":true,"type":"module","scripts":{},"devDependencies":{"@solana/spl-token":"^0.4.15","@solana/web3.js":"^1.99.0","bs58":"^4.0.1"}}

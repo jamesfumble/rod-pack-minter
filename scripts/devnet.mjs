@@ -53,7 +53,7 @@ const commands = {
     // Spread SOL from the admin to the other test keys.
     async fund() {
         const k = K();
-        const want = { funder: 1.0, owner: 0.1, approver: 0.01, player: 0.1 };
+        const want = { funder: 0.4, owner: 0.05, approver: 0.01, player: 0.05 };
         const ixs = [];
         for (const [n, amount] of Object.entries(want)) {
             const have = await sol(k[n].publicKey);
@@ -279,7 +279,8 @@ async function ensureLookupTable(authority, ixs, exclude) {
         const ext = AddressLookupTableProgram.extendLookupTable({ lookupTable: lut.key, authority: authority.publicKey, payer: authority.publicKey, addresses: missing });
         console.log('extend lookup table', explorer(await send([ext], authority)));
     } else {
-        const slot = await conn.getSlot('finalized');
+        // An older slot: the public RPC can return a slot the executing node has not seen yet (is not a recent slot).
+        const slot = (await conn.getSlot('finalized')) - 50;
         const [create, lutKey] = AddressLookupTableProgram.createLookupTable({ authority: authority.publicKey, payer: authority.publicKey, recentSlot: slot });
         const ext = AddressLookupTableProgram.extendLookupTable({ lookupTable: lutKey, authority: authority.publicKey, payer: authority.publicKey, addresses });
         console.log('create lookup table', explorer(await send([create, ext], authority)));

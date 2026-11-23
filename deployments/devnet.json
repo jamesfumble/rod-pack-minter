@@ -1,0 +1,24 @@
+{
+  "bootyMint": "DoLiFRNVuuGvKnAAU8WvRy2KZ1FKDCmjSyGdJw7yEBdA",
+  "bootyDestination": "4YQFFaPwniikK9ZBm3ERuJxmi7QTqocaSb3tPBUdJtak",
+  "playerBooty": "GU11eMrvgnXnCTaTKKVRrdo7iVySAyT8uLe3vu7tEmK4",
+  "network": "devnet",
+  "programId": "RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN",
+  "deployedAt": "2026-11-23T22:02:11.332Z",
+  "collectionMint": "GTieLvbNLMU1hhEZHUUtTjwiSoU1jf9zzMfKUj6DKFgg",
+  "collectionAuthorityRecord": "2GPzeCab2vrNzZjK9tBXVKGQtmVAoE9j23A5Lz6rBAvj",
+  "config": "ERQ8ZiFJLnwcGBTuoR9ESSFWTuDY9dXw5WWVetdoPCSx",
+  "mintAuthority": "DBWpKB4FznUJegj4HYR6Q9BwwE8DSLHtB7gMRNU9gDfB",
+  "expansions": {
+    "first_crush": {
+      "id": 1,
+      "expansion": "FK9BfPbyzo5NzYZQ7qpqJ6j7zxBtayKyXyk7myFuZcSd",
+      "cardTable": "FjHZwedvmt79J2jeZ7Kc1LeXWRpQH2BP5o1Yhq81YGK4"
+    }
+  },
+  "trees": [
+    "C3XUSVPDEZTu3fXzTBBvw6TGno4DJdjsWXxMEzkTMHeH",
+    "5Up12nzgJCsCkZAUAyESPvZB1wWGu1gjnDDdnY4Bi6sj"
+  ],
+  "lookupTable": "A44typVio7FWNQ8UuQnrW3ApzpUAnJKtDPLXdakULx9C"
+}

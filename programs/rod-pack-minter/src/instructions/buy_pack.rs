@@ -136,6 +136,7 @@ pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 
     p.weights_regular = weights_regular;
     p.weights_guaranteed = weights_guaranteed;
     p.rarity_counts = counts;
+    p.redraws = 0;
 
     let config = &mut ctx.accounts.config;
     config.pending_packs = config.pending_packs.checked_add(1).ok_or(ErrorCode::Overflow)?;

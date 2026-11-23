@@ -50,8 +50,8 @@ pub fn lookup_slot_hash(slot_hashes: &AccountInfo, slot: u64) -> Result<SlotLook
 }
 
 /// Records the hash the draw will use: the purchase slot's own hash. If nobody sealed or opened the pack within the
-/// SlotHashes window (~512 slots, ~3.4 minutes), there is no fair hash left and only the admin can refund it. There
-/// is deliberately no fallback hash: any fallback would be a second outcome that someone could choose by stalling.
+/// SlotHashes window (~512 slots, ~3.4 minutes), there is no fair hash left: `redraw_pack` then gives the pack a new
+/// purchase slot. There is deliberately no fallback hash known in advance.
 pub fn seal(pending: &mut PendingPack, slot_hashes: &AccountInfo) -> Result<()> {
     require!(!pending.sealed, ErrorCode::AlreadySealed);
     let hash = match lookup_slot_hash(slot_hashes, pending.purchase_slot)? {

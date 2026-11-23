@@ -31,6 +31,17 @@ collection owner `4jBVfRCTLvRL2NaMy4vf5XFyT21H9ryDBFbeeyBp5zFg`, player `9fUJVnU
 - `admin_mint`: 2 copies of card #50 to the test player.
 - Rent (same on mainnet, checked 2026-11-23): tree 0.2451 SOL, program 2.2236 SOL.
 
+## Upgrade to the two-step purchase (2026-11-24)
+
+- Program upgraded (584 KB); `migrate` extended the v1 config, created the vault
+  `CLsycEHRCtxwqG6EUxthEPSTi4pb6n5EGQzbYGm4MTLa` and registered it.
+- The old-format card table of expansion 1 could not be rewritten (rarities locked), so expansion 1 is paused and
+  First Crush is **expansion 2** (66 cards, checked against the card list), as mainnet will start fresh.
+- Two packs bought and opened: `buy_pack` 476 bytes ~42-45k CU, `open_pack` 377 bytes ~426-442k CU; player net
+  36,000 lamports per pack; opener net +9,000 to +14,000 lamports.
+- Outage test: a pack left unopened for 270 s could not be opened (`SlotHashUnavailable`); `redraw_pack` gave it a
+  new slot and it opened normally. The price never left the vault.
+
 ## How it was set up (repeatable)
 
 Rehearse on Surfpool first (`surfpool start --network devnet --no-deploy -p 18899`, then the same commands with
@@ -47,7 +58,11 @@ node scripts/devnet.mjs expansion             # First Crush + 66 cards from Card
 node scripts/devnet.mjs tree admin            # active tree
 node scripts/devnet.mjs tree funder           # standby tree
 node scripts/devnet.mjs unpause
-node scripts/devnet.mjs buy                   # one pack as the test player (wallet signs first, approver second)
+node scripts/devnet.mjs buy                   # buy_pack (wallet first, approver second), then open_pack by the opener
+node scripts/devnet.mjs buy-only              # step 1 only; prints the order id
+node scripts/devnet.mjs open <order-hex>      # step 2
+node scripts/devnet.mjs redraw <order-hex>    # after the slot hash expired (outage), then opens
+node scripts/devnet.mjs refund <order-hex>    # admin support tool
 node scripts/devnet.mjs admin-mint 50 2       # 2 copies of card 50 to the player
 node scripts/devnet.mjs status
 ```

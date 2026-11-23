@@ -56,7 +56,7 @@ impl Config {
     pub const V1_LEN: usize = 8 + 32 * 8 + 1 + 4 * 4 + 2 + 8 + 8 + 1 + 1;
 }
 
-/// A paid, not yet opened pack. PDA ["pack", player, order_id]. Closed by `open_pack` or the admin's `refund_pack`,
+/// A paid, not yet opened pack. PDA ["pack", player, order_id]. Closed by `open_pack` (or the admin's `refund_pack`),
 /// which return its rent to the player. The draw inputs (weights and card counts) are frozen here at purchase, so
 /// later admin edits to the expansion cannot change a paid pack.
 #[account]
@@ -84,6 +84,8 @@ pub struct PendingPack {
     /// Cards per rarity at purchase. Cards are only appended, so the first `rarity_counts[r]` cards of rarity r are
     /// the same set at open time.
     pub rarity_counts: [u16; RARITY_COUNT],
+    /// How many times `redraw_pack` gave this pack a new purchase slot (after an outage).
+    pub redraws: u8,
 }
 
 /// One card expansion (First Crush = 1). PDA ["expansion", id as u16 LE].
@@ -237,6 +239,14 @@ pub struct PackMinted {
     pub card_ids: Vec<u16>,
     pub price: u64,
     pub seed: [u8; 32],
+}
+
+#[event]
+pub struct PackRedrawn {
+    pub pending_pack: Pubkey,
+    pub old_slot: u64,
+    pub new_slot: u64,
+    pub redraws: u8,
 }
 
 #[event]

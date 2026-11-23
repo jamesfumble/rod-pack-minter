@@ -12,11 +12,13 @@ residual risks that were accepted, and the rules the backend must follow.
   - The opener and the opening time do not affect the seed.
   - Weights and card counts are frozen in the PendingPack at purchase.
   - Card rarities cannot change once in a table, and cards are only appended.
-- **No refund option.** Only the admin can refund. The cards of a paid pack are public from the next slot, so a
-  refund the player could trigger would let them return bad packs.
-- **No fallback hash.** A pack whose slot hash left SlotHashes (~512 slots) before anyone sealed it can only be
-  refunded by the admin. Any fallback would be a second outcome to choose by stalling. Bots and the backend are
-  paid (`seal_fee`, `open_fee`) to seal or open early.
+- **No refund option.** Only the admin can refund, as a support tool. The cards of a paid pack are public from the
+  next slot, so a refund the player could trigger would let them return bad packs.
+- **Outages: redraw, not refund.** A pack whose slot hash left SlotHashes (~512 slots) before anyone sealed or
+  opened it gets a new purchase slot from `redraw_pack` (anyone may call it; the backend does it automatically).
+  The new slot's hash does not exist yet when the redraw is sent, so the redraw is as fair as a new purchase. The
+  price never leaves the vault. There is no fallback hash known in advance. Bots and the backend are paid
+  (`seal_fee`, `open_fee`) to seal or open early.
 - **Mintable when sold.** `buy_pack` reserves tree leaves (`reserved_leaves` against active + standby free leaves)
   and requires weights that can draw a card, so a paid pack can always be opened.
 - **Only the admin picks a card** (`admin_mint`). Trees are created with the program PDA as creator and delegate,
@@ -38,6 +40,9 @@ residual risks that were accepted, and the rules the backend must follow.
 
 ## Accepted residual risks
 
+- **Outage re-roll.** During an outage of every opener (more than ~3.4 minutes), a player who computed that their
+  pack's cards are bad could avoid sealing it, so that it is redrawn. A refund and a new purchase would give the same
+  edge. The game client opening the pack itself as a backup keeps such outages rare.
 - **Block leader.** A colluding leader of the purchase slot could try block contents to influence that slot's hash.
 - **Forks.** If a purchase lands on a fork that loses, a player who saw that fork's hash could try to keep the
   purchase off the winning fork. The player cannot cause forks.
@@ -52,8 +57,10 @@ residual risks that were accepted, and the rules the backend must follow.
 - **Order ids.** Generate `order_id` on the server only (random 16 bytes), never from client input.
 - **Signing.** Co-sign `buy_pack` only for a transaction the server built, with the expected `max_price`. Send it
   yourself.
-- **Opening.** Send `open_pack` as soon as the purchase slot is complete, and retry. If opening must wait (e.g. no
-  room after a rotation), send `seal_pack` within ~3 minutes.
+- **Opening.** Send `open_pack` as soon as the purchase slot is complete, and retry on failure. If opening must wait,
+  send `seal_pack` within ~3 minutes. A pending pack that fails with `SlotHashUnavailable` gets `redraw_pack`, then
+  `open_pack` one slot later. The game client should also send `open_pack` itself if the backend has not opened the
+  pack after a few seconds.
 - **Reading events.** Take PackBought / PackMinted only from:
   - a successful, finalized transaction;
   - inner instructions of program `RoD7T8...`;

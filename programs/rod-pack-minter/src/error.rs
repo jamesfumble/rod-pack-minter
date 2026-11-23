@@ -66,8 +66,10 @@ pub enum ErrorCode {
     TooEarlyToOpen,
     #[msg("The pack is already sealed")]
     AlreadySealed,
-    #[msg("The purchase slot's hash is no longer in SlotHashes; the pack can only be refunded by the admin")]
+    #[msg("The purchase slot's hash is no longer in SlotHashes; redraw the pack (redraw_pack) first")]
     SlotHashUnavailable,
+    #[msg("The pack can still be opened (or is not yet openable); redraw is only for packs whose slot hash expired")]
+    PackStillOpenable,
     #[msg("The refund period has not started")]
     TooEarlyToRefund,
     #[msg("Wrong player for this pack")]

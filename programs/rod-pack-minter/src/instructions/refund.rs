@@ -8,8 +8,8 @@ use crate::{
     state::{Config, PackRefunded, PendingPack},
 };
 
-/// The admin returns the price of a pack that could not be opened (for example its hash left SlotHashes during an
-/// outage). Admin-only on purpose: the cards of any paid pack are public from the slot after purchase, so a refund
+/// Support tool, not part of normal operation (failed transactions are retried and outages are handled by
+/// `redraw_pack`): the admin returns the price of an unopened pack. Admin-only on purpose: the cards of any paid pack are public from the slot after purchase, so a refund
 /// the player could trigger would let them keep good packs and return bad ones. The price goes to the player's own
 /// $BOOTY account, the PendingPack rent back to the player, and the player's fee deposit to the admin (who sent the
 /// transaction), so the player still pays every fee.

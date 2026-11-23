@@ -114,21 +114,55 @@ fn a_sealed_pack_keeps_its_cards_after_slot_hashes_expire() {
 }
 
 #[test]
-fn an_unsealed_pack_past_the_window_cannot_be_opened_only_refunded_by_the_admin() {
+fn a_pack_nobody_opened_in_time_is_redrawn_not_refunded() {
     let (mut env, id, tree) = Env::ready();
     let order = env.buy(id, 150 * BOOTY).unwrap();
     let purchase_slot = current_slot(&env.svm);
+    let caller = Keypair::new();
+    env.svm.airdrop(&caller.pubkey(), 1_000_000_000).unwrap();
+
+    // While the purchase slot's hash is available, the pack must be opened, not redrawn.
+    warp(&mut env.svm, purchase_slot + 1);
+    let ix = env.redraw_ix(&caller.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &caller, &[]), "PackStillOpenable");
+
+    // An outage: nobody opened or sealed it for 600 slots. Opening and sealing are no longer possible.
     warp(&mut env.svm, purchase_slot + 600);
     assert_err(env.open(&order, id), "SlotHashUnavailable");
-    let sealer = env.opener.insecure_clone();
-    let ix = env.seal_ix(&sealer.pubkey(), &order);
-    assert_err(send(&mut env.svm, &[ix], &sealer, &[]), "SlotHashUnavailable");
-    assert_eq!(env.num_minted(&tree), 0);
-    let now = env.now();
-    env.set_time(now + REFUND_AFTER);
-    let ix = env.refund_ix(&env.admin.pubkey(), &order);
-    env.run_admin(ix).expect("admin refund");
-    assert!(env.pending(&order).is_none());
+    let ix = env.seal_ix(&caller.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &caller, &[]), "SlotHashUnavailable");
+
+    // Anyone (normally the backend) redraws it; the caller is paid from the player's deposit.
+    let before = env.svm.get_balance(&caller.pubkey()).unwrap();
+    let ix = env.redraw_ix(&caller.pubkey(), &order);
+    send(&mut env.svm, &[ix], &caller, &[]).expect("redraw_pack");
+    assert_eq!(env.svm.get_balance(&caller.pubkey()).unwrap() + 5_000 - before, SEAL_FEE);
+    let new_slot = current_slot(&env.svm);
+    let p = env.pending(&order).unwrap();
+    assert_eq!((p.purchase_slot, p.redraws, p.sealed), (new_slot, 1, false));
+    assert_eq!(token_amount(&env.svm, &vault_pda(&env.booty_mint)), 150 * BOOTY, "the price never left the vault");
+
+    // The new slot's hash does not exist yet; one slot later the pack opens with cards from it.
+    assert_err(env.open(&order, id), "TooEarlyToOpen");
+    let meta = env.next_slot_and_open(&order, id).expect("open after redraw");
+    assert_eq!(pack_event(&meta).card_ids, expected_cards(&env, &slot_hash_of(new_slot), &order, new_slot, id));
+    assert_eq!(env.num_minted(&tree), 6);
+    assert_eq!(token_amount(&env.svm, &env.shop_token), 150 * BOOTY);
+}
+
+#[test]
+fn a_sealed_pack_cannot_be_redrawn() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let s = current_slot(&env.svm);
+    warp(&mut env.svm, s + 1);
+    let opener = env.opener.insecure_clone();
+    let ix = env.seal_ix(&opener.pubkey(), &order);
+    send(&mut env.svm, &[ix], &opener, &[]).unwrap();
+    warp(&mut env.svm, s + 2000);
+    let ix = env.redraw_ix(&opener.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &opener, &[]), "AlreadySealed");
+    env.open(&order, id).expect("the sealed pack still opens with its original cards");
 }
 
 #[test]

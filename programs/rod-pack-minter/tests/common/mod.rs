@@ -634,6 +634,21 @@ impl Env {
         )
     }
 
+    pub fn redraw_ix(&self, caller: &Pubkey, order_id: &[u8; 16]) -> Instruction {
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::RedrawPack {}.data(),
+            rod_pack_minter::accounts::RedrawPack {
+                caller: *caller,
+                pending_pack: pending_pda(&self.player.pubkey(), order_id),
+                slot_hashes: SLOT_HASHES_ID,
+                event_authority: event_authority_pda(),
+                program: rod_pack_minter::ID,
+            }
+            .to_account_metas(None),
+        )
+    }
+
     /// The admin's refund of a pack of the test player.
     pub fn refund_ix(&self, signer: &Pubkey, order_id: &[u8; 16]) -> Instruction {
         Instruction::new_with_bytes(

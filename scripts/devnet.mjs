@@ -326,6 +326,16 @@ const commands = {
         await showPack(sig, exp);
     },
 
+    // After an outage: a pack whose purchase slot hash expired unsealed gets a new purchase slot, then opens normally.
+    async redraw(orderHex) {
+        const k = K();
+        const pendingKey = c.pendingPda(k.player.publicKey, Buffer.from(orderHex, 'hex'));
+        const i = c.ix('redraw_pack', {}, { caller: k.opener.publicKey, pending_pack: pendingKey, slot_hashes: SLOT_HASHES, ...c.eventAccounts() });
+        console.log('redraw_pack', explorer(await send([i], k.opener)));
+        await new Promise((r) => setTimeout(r, 2000));
+        await commands.open(orderHex);
+    },
+
     // Both steps, the way the backend will run them: buy, wait for the purchase slot to complete, open.
     async buy() {
         const k = K();

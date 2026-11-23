@@ -10,7 +10,10 @@ Metadata collection. A purchase has two steps:
 
 Nobody (player, backend, opener or admin) can choose or re-roll a paid pack's cards. Only `admin_mint` (admin-signed)
 picks a card. The player pays every fee: `buy_pack` takes a deposit that the program pays to whoever opens the pack.
-A pack that cannot be opened (its slot hash left SlotHashes during an outage) can only be refunded by the admin.
+Failed transactions need no refund: a failed `buy_pack` takes nothing, and a failed `open_pack` is simply retried
+(the cards are already fixed). If nobody opens a pack while its slot hash is in SlotHashes (~3.4 minutes, i.e. an
+outage), anyone (the backend automatically) calls `redraw_pack`: the pack gets a new purchase slot and then opens
+normally, so the price never leaves the vault and nobody handles refunds.
 
 Plan and decisions: `ci-cardgame/docs/plans/2026-11-22-first-crush-expansion.md`. Security notes: `docs/security.md`.
 
@@ -27,7 +30,8 @@ Plan and decisions: `ci-cardgame/docs/plans/2026-11-22-first-crush-expansion.md`
 | `buy_pack(expansion_id, order_id, max_price)` | player + approver | Step 1: price to the vault, PendingPack, fee deposit |
 | `open_pack` | anyone | Step 2: seal, draw, mint, price to the shop, deposit to the opener, rent back to the player |
 | `seal_pack` | anyone | Stores the purchase slot's hash early (when opening must wait); paid from the deposit |
-| `refund_pack` | admin | Price back to the player for a pack that cannot be opened (after `refund_after_secs`) |
+| `redraw_pack` | anyone | After an outage: gives an unopened, unsealed pack whose slot hash expired a new purchase slot |
+| `refund_pack` | admin | Support tool only: price back to the player for an unopened pack (after `refund_after_secs`) |
 | `admin_mint(expansion_id, card_id, count)` | admin | Mints a chosen card to any wallet, no payment |
 
 Pause (global or per expansion) stops `buy_pack` and `admin_mint`; already paid packs can still be opened.
@@ -44,7 +48,7 @@ anchor build                     # target\deploy\rod_pack_minter.so + target\idl
 cargo test -p rod-pack-minter -- --nocapture
 ```
 
-The tests (32) run in LiteSVM with the real Metaplex programs. Measured: `buy_pack` ~30-46k CU, `open_pack` of 6 cards
+The tests (33) run in LiteSVM with the real Metaplex programs. Measured: `buy_pack` ~30-46k CU, `open_pack` of 6 cards
 ~400-440k CU, 10 cards ~650-770k CU (also with a full 400-card table), `admin_mint` of 3 cards ~200k CU (callers must set
 a compute limit). With a lookup table: `buy_pack` 444-476 bytes, `rotate_tree` + `open_pack` 361-377 bytes.
 

@@ -11,9 +11,9 @@
   "mintAuthority": "DBWpKB4FznUJegj4HYR6Q9BwwE8DSLHtB7gMRNU9gDfB",
   "expansions": {
     "first_crush": {
-      "id": 2,
-      "expansion": "psnKQfvdcneiVasVvi7bcutAbi5HxGW8GQNPoDXMrS6",
-      "cardTable": "Cy8wMFdAhWvTg1hz6KaFeLFt291erxKfgr1KRUyBPVdz"
+      "id": 3,
+      "expansion": "DXBztqyeokmZxntcgvMSgedcMzmKww54fHjeabRsUKuG",
+      "cardTable": "H4zBz8276XhrRfunUEUHxdAXLG75hnEZVjDsxHNcN9ms"
     }
   },
   "trees": [
@@ -21,9 +21,19 @@
     "5Up12nzgJCsCkZAUAyESPvZB1wWGu1gjnDDdnY4Bi6sj"
   ],
   "lookupTable": "A44typVio7FWNQ8UuQnrW3ApzpUAnJKtDPLXdakULx9C",
-  "upgradedAt": "2026-11-24T00:15:28.682Z",
+  "upgradedAt": "2026-11-24T01:18:22.658Z",
   "vault": "CLsycEHRCtxwqG6EUxthEPSTi4pb6n5EGQzbYGm4MTLa",
   "legacyExpansions": [
     1
-  ]
+  ],
+  "lustMint": "43nJYKxndVR4qsBWnUEQygs1WAbQ9X8k3XX1K2LY5Npu",
+  "playerLust": "4b1BV8BLAgLvoDwVqUBUnwSL7swtQjTgPBsodvLPPzAD",
+  "lustDestinations": [
+    "A6gz1aNhsnTzyY5P3nheoPSeryP4aJEp5ji12EUDQJ3j",
+    "62B49TtniD6iLPCsUytxHeFyQVvS5hs234DL4n6DfUwV",
+    "FUZjweFjTGDRMdLw9wzWDKF3zRbeBYT1iZbwhLey4zJP",
+    "3Czb8Hb4xXqVubG2MN7yRq3WBg2ndSeQFnuGe9NGQpV3"
+  ],
+  "lustVault": "3W6jDH2KW32yUZ7TqbRF7omnsZeHkWg6sAUkQvjwa9R1",
+  "lustConfig": "9DvyAEDi3siiN3owrwwr3rg24jjr2qRqQZfdebUS1x9D"
 }

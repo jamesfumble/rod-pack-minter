@@ -42,6 +42,15 @@ collection owner `4jBVfRCTLvRL2NaMy4vf5XFyT21H9ryDBFbeeyBp5zFg`, player `9fUJVnU
 - Outage test: a pack left unopened for 270 s could not be opened (`SlotHashUnavailable`); `redraw_pack` gave it a
   new slot and it opened normally. The price never left the vault.
 
+## $LUST payments and catalog prices (2026-11-24)
+
+- Program upgraded (643 KB). Test $LUST set up (`node scripts/devnet.mjs lust`): vault, four split destinations,
+  split 10/10/45/25 with 10% burned.
+- Expansion 2 has the older price layout and cannot be read by the program (so it cannot be sold). First Crush is
+  **expansion 3**: 150 $BOOTY or 1,000 $LUST.
+- One $BOOTY pack and one $LUST pack bought and opened. The $LUST pack paid out 100 / 100 / 450 / 250 $LUST, and
+  100 $LUST was burned (supply 100,000 to 99,900). The vault is empty again.
+
 ## How it was set up (repeatable)
 
 Rehearse on Surfpool first (`surfpool start --network devnet --no-deploy -p 18899`, then the same commands with

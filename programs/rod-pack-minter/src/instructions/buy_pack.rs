@@ -50,16 +50,17 @@ pub struct BuyPack<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Free leaves in the active and standby trees together.
+/// Leaves of the active and standby trees that packs can really use. A pack must fit in one tree and a tree can be
+/// rotated away with up to ROTATION_WASTE leaves left, so those are not counted.
 fn free_leaves(ctx: &Context<BuyPack>) -> Result<u64> {
     let config = &ctx.accounts.config;
     require!(config.active_tree != Pubkey::default(), ErrorCode::NoActiveTree);
     let active = TreeConfigView::load(&ctx.accounts.active_tree_config.to_account_info(), &config.active_tree)?;
-    let mut free = active.free_leaves();
+    let mut free = active.free_leaves().saturating_sub(ROTATION_WASTE);
     if config.standby_tree != Pubkey::default() {
         require_keys_eq!(ctx.accounts.standby_tree_config.key(), tree_config_address(&config.standby_tree), ErrorCode::BadTreeConfig);
         let standby = TreeConfigView::load(&ctx.accounts.standby_tree_config.to_account_info(), &config.standby_tree)?;
-        free = free.saturating_add(standby.free_leaves());
+        free = free.saturating_add(standby.free_leaves().saturating_sub(ROTATION_WASTE));
     }
     Ok(free)
 }

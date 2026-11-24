@@ -103,6 +103,18 @@ pub fn handle_update_expansion(ctx: Context<ExpansionAdmin>, _expansion_id: u16,
     let e = &ctx.accounts.expansion;
     // Cards already minted belong to the current collection; moving the expansion to another one would split it.
     require!(params.collection_mint == e.collection_mint || e.cards_minted == 0, ErrorCode::CollectionLocked);
+    // Paid packs are minted with this metadata; it may not change under them. (Weights and pack size are frozen in
+    // each PendingPack, so those may change.)
+    if ctx.accounts.config.pending_packs > 0 {
+        require!(
+            params.collection_mint == e.collection_mint
+                && params.creator == e.creator
+                && params.royalty_bps == e.royalty_bps
+                && params.symbol == e.symbol
+                && params.uri_prefix == e.uri_prefix,
+            ErrorCode::LockedWhilePending
+        );
+    }
     apply(&mut ctx.accounts.expansion, params);
     Ok(())
 }
@@ -161,6 +173,9 @@ pub fn handle_upsert_cards(ctx: Context<UpsertCards>, _expansion_id: u16, start_
     let old_count = ctx.accounts.card_table.count as usize;
     require!(start <= old_count, ErrorCode::BadCardIndex);
     require!(start + cards.len() <= MAX_CARDS, ErrorCode::TooManyCards);
+    // The cards of a paid pack are public before it is opened; editing an existing entry (name or URI) then would
+    // let the admin choose what a buyer receives. Appending is always allowed (pending packs ignore new cards).
+    require!(start >= old_count || ctx.accounts.config.pending_packs == 0, ErrorCode::LockedWhilePending);
     for c in &cards {
         require!((c.rarity as usize) < RARITY_COUNT, ErrorCode::BadRarity);
         require!(!c.name.is_empty() && c.name.len() <= MAX_NAME_LEN, ErrorCode::TextTooLong);

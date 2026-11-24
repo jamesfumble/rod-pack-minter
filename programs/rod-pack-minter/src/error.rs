@@ -92,4 +92,8 @@ pub enum ErrorCode {
     RarityLocked,
     #[msg("The vault cannot be the destination or the refund account")]
     VaultNotAllowed,
+    #[msg("Existing cards and the expansion's metadata cannot change while packs are pending")]
+    LockedWhilePending,
+    #[msg("Only the backend approver or the admin may redraw a pack")]
+    NotRedrawer,
 }

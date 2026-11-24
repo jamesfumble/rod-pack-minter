@@ -643,6 +643,7 @@ impl Env {
             &rod_pack_minter::instruction::RedrawPack {}.data(),
             rod_pack_minter::accounts::RedrawPack {
                 caller: *caller,
+                config: config_pda(),
                 pending_pack: pending_pda(&self.player.pubkey(), order_id),
                 slot_hashes: SLOT_HASHES_ID,
                 event_authority: event_authority_pda(),

@@ -105,7 +105,9 @@ fn a_sealed_pack_keeps_its_cards_after_slot_hashes_expire() {
     let before = env.svm.get_balance(&sealer.pubkey()).unwrap();
     let ix = env.seal_ix(&sealer.pubkey(), &order);
     send(&mut env.svm, &[ix], &sealer, &[]).expect("seal_pack");
-    assert_eq!(env.svm.get_balance(&sealer.pubkey()).unwrap() - before + 5_000, RETRY_FEE, "sealer repaid from the retry pool");
+    // Sealing right after purchase earns nothing (open_pack would seal for free); this stops fee-sniping bots.
+    assert_eq!(before - env.svm.get_balance(&sealer.pubkey()).unwrap(), 5_000, "unpaid seal inside the grace period");
+    assert_eq!(env.pending(&order).unwrap().retry_pool, RETRY_POOL);
     let ix = env.seal_ix(&sealer.pubkey(), &order);
     assert_err(send(&mut env.svm, &[ix], &sealer, &[]), "AlreadySealed");
 
@@ -119,8 +121,7 @@ fn a_pack_nobody_opened_in_time_is_redrawn_not_refunded() {
     let (mut env, id, tree) = Env::ready();
     let order = env.buy(id, 150 * BOOTY).unwrap();
     let purchase_slot = current_slot(&env.svm);
-    let caller = Keypair::new();
-    env.svm.airdrop(&caller.pubkey(), 1_000_000_000).unwrap();
+    let caller = env.approver.insecure_clone();
 
     // While the purchase slot's hash is available, the pack must be opened, not redrawn.
     warp(&mut env.svm, purchase_slot + 1);
@@ -133,7 +134,15 @@ fn a_pack_nobody_opened_in_time_is_redrawn_not_refunded() {
     let ix = env.seal_ix(&caller.pubkey(), &order);
     assert_err(send(&mut env.svm, &[ix], &caller, &[]), "SlotHashUnavailable");
 
-    // Anyone (normally the backend) redraws it; the caller is paid from the player's deposit.
+    // A stranger (or the player) cannot redraw: the new draw slot is when the redraw lands, so it must not be timed by
+    // them. The backend approver redraws it and is paid from the player's retry pool.
+    let stranger = Keypair::new();
+    env.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    let ix = env.redraw_ix(&stranger.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &stranger, &[]), "NotRedrawer");
+    let player = env.player.insecure_clone();
+    let ix = env.redraw_ix(&player.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &player, &[]), "NotRedrawer");
     let before = env.svm.get_balance(&caller.pubkey()).unwrap();
     let ix = env.redraw_ix(&caller.pubkey(), &order);
     send(&mut env.svm, &[ix], &caller, &[]).expect("redraw_pack");
@@ -157,8 +166,7 @@ fn the_retry_pool_pays_three_redraws_and_the_rest_returns_to_the_player() {
     let sol_before = env.svm.get_balance(&env.player.pubkey()).unwrap();
     let order = env.buy(id, 150 * BOOTY).unwrap();
     assert_eq!(env.pending(&order).unwrap().retry_pool, RETRY_POOL);
-    let caller = Keypair::new();
-    env.svm.airdrop(&caller.pubkey(), 1_000_000_000).unwrap();
+    let caller = env.approver.insecure_clone();
     // Four outages in a row: the first three redraws are paid from the pool, the fourth is not (pool empty).
     for round in 0..4u64 {
         let slot = env.pending(&order).unwrap().purchase_slot;
@@ -186,8 +194,9 @@ fn a_sealed_pack_cannot_be_redrawn() {
     let ix = env.seal_ix(&opener.pubkey(), &order);
     send(&mut env.svm, &[ix], &opener, &[]).unwrap();
     warp(&mut env.svm, s + 2000);
-    let ix = env.redraw_ix(&opener.pubkey(), &order);
-    assert_err(send(&mut env.svm, &[ix], &opener, &[]), "AlreadySealed");
+    let approver = env.approver.insecure_clone();
+    let ix = env.redraw_ix(&approver.pubkey(), &order);
+    assert_err(send(&mut env.svm, &[ix], &approver, &[]), "AlreadySealed");
     env.open(&order, id).expect("the sealed pack still opens with its original cards");
 }
 
@@ -252,6 +261,26 @@ fn admin_edits_after_purchase_do_not_change_a_paid_pack() {
     env.run_admin(ix).unwrap();
     let meta = env.next_slot_and_open(&order, id).unwrap();
     assert_eq!(pack_event(&meta).card_ids, expected, "drawn with the weights and cards frozen at purchase");
+}
+
+#[test]
+fn the_admin_cannot_rewrite_cards_or_metadata_while_packs_are_pending() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    let card = rod_pack_minter::CardInput { rarity: 0, name: "Swapped".into(), uri_suffix: "other.json".into() };
+    let ix = env.upsert_ix(&env.admin.pubkey(), id, 0, vec![card.clone()]);
+    assert_err(env.run_admin(ix), "LockedWhilePending");
+    let mut p = env.first_crush_params();
+    p.uri_prefix = "https://elsewhere/".into();
+    let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::UpdateExpansion { expansion_id: id, params: p }.data());
+    assert_err(env.run_admin(ix), "LockedWhilePending");
+    // Appending a card and changing weights is fine (pending packs ignore both).
+    let ix = env.upsert_ix(&env.admin.pubkey(), id, 66, vec![card.clone()]);
+    env.run_admin(ix).expect("append while pending");
+    // Once nothing is pending, existing cards may be edited again.
+    env.next_slot_and_open(&order, id).unwrap();
+    let ix = env.upsert_ix(&env.admin.pubkey(), id, 0, vec![card]);
+    env.run_admin(ix).expect("edit with nothing pending");
 }
 
 #[test]
@@ -610,10 +639,13 @@ fn migrate_config_extends_a_v1_config() {
 
 #[test]
 fn trees_are_made_by_admin_or_funder_and_rotate_when_full() {
-    // Depth 3 = 8 leaves: one 6-card pack fits, a second does not.
-    let (mut env, id, first) = Env::ready_with(Env::with_tree_size(3, 8, 0));
-    env.buy_and_open(id, 150 * BOOTY).expect("first pack");
-    // Only 2 leaves left and no standby tree: the next pack is not sold at all (nothing is paid).
+    // Depth 5 = 32 leaves. A tree's last ROTATION_WASTE (9) leaves are not sold, because a pack must fit in one tree.
+    let (mut env, id, first) = Env::ready_with(Env::with_tree_size(5, 8, 0));
+    for _ in 0..3 {
+        env.buy_and_open(id, 150 * BOOTY).expect("pack");
+    }
+    assert_eq!(env.num_minted(&first), 18);
+    // 14 left, 5 usable: the next pack is not sold at all (nothing is paid).
     let booty = token_amount(&env.svm, &env.player_token);
     assert_err(env.buy(id, 150 * BOOTY), "TreeFull");
     assert_eq!(token_amount(&env.svm, &env.player_token), booty);
@@ -627,12 +659,14 @@ fn trees_are_made_by_admin_or_funder_and_rotate_when_full() {
     let funder = env.funder.insecure_clone();
     let standby = env.create_tree(&funder).expect("funder creates the standby tree");
     assert_err(env.create_tree(&funder), "StandbyExists");
-    // With the standby tree's room counted, the pack is sold.
-    let order = env.buy(id, 150 * BOOTY).expect("sold once there is room");
+
+    // With the standby tree counted, packs sell again. This one still fits in the active tree (14 free).
+    env.buy_and_open(id, 150 * BOOTY).expect("fourth pack");
+    assert_eq!(env.num_minted(&first), 24);
+    // 8 left in the active tree: the next pack needs the standby tree; the backend puts rotate_tree in front.
+    let order = env.buy(id, 150 * BOOTY).expect("fifth pack sold");
     let s = current_slot(&env.svm);
     warp(&mut env.svm, s + 1);
-
-    // The backend puts rotate_tree in front of open_pack.
     let rotate = env.rotate_ix();
     let mut open = env.open_ix(&env.opener.pubkey(), &order, &env.player.pubkey(), id);
     for m in open.accounts.iter_mut() {
@@ -645,7 +679,7 @@ fn trees_are_made_by_admin_or_funder_and_rotate_when_full() {
     let opener = env.opener.insecure_clone();
     send(&mut env.svm, &[compute_limit_ix(1_400_000), rotate, open], &opener, &[]).expect("rotate + open");
     let c = env.config();
-    assert_eq!((c.active_tree, c.standby_tree, c.trees_created), (standby, Pubkey::default(), 2));
+    assert_eq!((c.active_tree, c.standby_tree, c.trees_created, c.reserved_leaves), (standby, Pubkey::default(), 2, 0));
     assert_eq!(env.num_minted(&standby), 6);
 }
 

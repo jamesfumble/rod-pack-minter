@@ -33,7 +33,9 @@ pub fn handle_admin_mint(ctx: Context<AdminMint>, expansion_id: u16, card_id: u1
     require!(count >= 1 && count <= MAX_ADMIN_MINT, ErrorCode::BadCount);
     require!(card_id < ctx.accounts.card_table.count, ErrorCode::BadCardId);
 
-    let view = ctx.accounts.mint.prepare(config, expansion, count as u64)?;
+    // Admin mints may not use leaves promised to paid packs.
+    let needed = config.reserved_leaves.checked_add(count as u64).ok_or(ErrorCode::Overflow)?;
+    let view = ctx.accounts.mint.prepare(config, expansion, needed)?;
     let card_ids = vec![card_id; count as usize];
     let recipient = ctx.accounts.recipient.to_account_info();
     let admin = ctx.accounts.admin.to_account_info();

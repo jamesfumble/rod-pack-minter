@@ -83,7 +83,8 @@ pub fn pay_from_pending(pending: &AccountInfo, to: &AccountInfo, lamports: u64) 
 }
 
 /// Anyone may seal a pack, e.g. when opening has to wait. It only stores the purchase slot's hash, so the cards are
-/// fixed and SlotHashes expiry no longer matters. The sealer is paid one retry fee from the player's retry pool.
+/// fixed and SlotHashes expiry no longer matters. From SEAL_PAY_DELAY_SLOTS after purchase the sealer is paid one
+/// retry fee from the player's retry pool.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct SealPack<'info> {
@@ -102,7 +103,10 @@ pub struct SealPack<'info> {
 pub fn handle_seal_pack(ctx: Context<SealPack>) -> Result<()> {
     let key = ctx.accounts.pending_pack.key();
     seal(&mut ctx.accounts.pending_pack, &ctx.accounts.slot_hashes.to_account_info())?;
-    pay_retry(&mut ctx.accounts.pending_pack, &ctx.accounts.sealer.to_account_info())?;
+    // Paid only when opening is really delayed; in normal operation open_pack seals for free.
+    if Clock::get()?.slot > ctx.accounts.pending_pack.purchase_slot.saturating_add(SEAL_PAY_DELAY_SLOTS) {
+        pay_retry(&mut ctx.accounts.pending_pack, &ctx.accounts.sealer.to_account_info())?;
+    }
     emit_cpi!(PackSealed { pending_pack: key, slot_hash: ctx.accounts.pending_pack.slot_hash });
     Ok(())
 }

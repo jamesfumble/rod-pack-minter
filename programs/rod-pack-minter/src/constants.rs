@@ -42,3 +42,8 @@ pub const MAX_TREE_DEPTH: u32 = 30;
 pub const MAX_FEE_LAMPORTS: u64 = 10_000_000;
 /// Upper bound for the number of seals/redraws the player's retry pool pays for.
 pub const MAX_PAID_RETRIES: u8 = 10;
+/// A separate `seal_pack` is only paid this many slots (~1 minute) after purchase; before that the backend's
+/// `open_pack` seals for free, so bots gain nothing by sealing every pack at once.
+pub const SEAL_PAY_DELAY_SLOTS: u64 = 150;
+/// Leaves a tree can lose at rotation (rotation is allowed below MAX_PACK_SIZE free leaves).
+pub const ROTATION_WASTE: u64 = MAX_PACK_SIZE as u64 - 1;

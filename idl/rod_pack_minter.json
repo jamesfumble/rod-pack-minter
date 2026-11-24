@@ -1107,8 +1107,30 @@
       "accounts": [
         {
           "name": "caller",
+          "docs": [
+            "The backend approver (automatically) or the admin. Not anyone: the new draw slot is the slot the redraw lands",
+            "in, so a player or a colluding validator must not be able to time it."
+          ],
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "pending_pack",
@@ -2458,6 +2480,16 @@
       "code": 6044,
       "name": "VaultNotAllowed",
       "msg": "The vault cannot be the destination or the refund account"
+    },
+    {
+      "code": 6045,
+      "name": "LockedWhilePending",
+      "msg": "Existing cards and the expansion's metadata cannot change while packs are pending"
+    },
+    {
+      "code": 6046,
+      "name": "NotRedrawer",
+      "msg": "Only the backend approver or the admin may redraw a pack"
     }
   ],
   "types": [

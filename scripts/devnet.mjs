@@ -339,8 +339,9 @@ const commands = {
     async redraw(orderHex) {
         const k = K();
         const pendingKey = c.pendingPda(k.player.publicKey, Buffer.from(orderHex, 'hex'));
-        const i = c.ix('redraw_pack', {}, { caller: k.opener.publicKey, pending_pack: pendingKey, slot_hashes: SLOT_HASHES, ...c.eventAccounts() });
-        console.log('redraw_pack', explorer(await send([i], k.opener)));
+        // Only the backend approver (or the admin) may redraw.
+        const i = c.ix('redraw_pack', {}, { caller: k.approver.publicKey, config: c.configPda(), pending_pack: pendingKey, slot_hashes: SLOT_HASHES, ...c.eventAccounts() });
+        console.log('redraw_pack', explorer(await send([i], k.approver)));
         await new Promise((r) => setTimeout(r, 2000));
         await commands.open(orderHex);
     },

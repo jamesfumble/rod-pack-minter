@@ -1,6 +1,6 @@
 # Security notes
 
-Two independent reviews were run (2026-11-23 and 2026-11-24). This file lists what the design guarantees, the
+Three independent reviews were run (2026-11-23, 2026-11-24 twice). This file lists what the design guarantees, the
 residual risks that were accepted, and the rules the backend must follow.
 
 ## Guarantees (enforced on chain)
@@ -12,15 +12,20 @@ residual risks that were accepted, and the rules the backend must follow.
   - The opener and the opening time do not affect the seed.
   - Weights and card counts are frozen in the PendingPack at purchase.
   - Card rarities cannot change once in a table, and cards are only appended.
+  - While packs are pending, existing card entries (name, URI) and the expansion's metadata settings (URI prefix,
+    symbol, creator, royalty, collection) cannot change, so the admin cannot swap what a paid pack mints. Minted
+    cards stay mutable through the collection's update authority, as before.
 - **No refund option.** Only the admin can refund, as a support tool. The cards of a paid pack are public from the
   next slot, so a refund the player could trigger would let them return bad packs.
 - **Outages: redraw, not refund.** A pack whose slot hash left SlotHashes (~512 slots) before anyone sealed or
-  opened it gets a new purchase slot from `redraw_pack` (anyone may call it; the backend does it automatically).
+  opened it gets a new purchase slot from `redraw_pack`. Only the backend approver (automatically) or the admin may
+  call it, so a player or a colluding validator cannot time the new draw slot.
   The new slot's hash does not exist yet when the redraw is sent, so the redraw is as fair as a new purchase. The
-  price never leaves the vault. There is no fallback hash known in advance. Bots and the backend are paid
-  (`seal_fee`, `open_fee`) to seal or open early.
-- **Mintable when sold.** `buy_pack` reserves tree leaves (`reserved_leaves` against active + standby free leaves)
-  and requires weights that can draw a card, so a paid pack can always be opened.
+  price never leaves the vault. There is no fallback hash known in advance. A separate `seal_pack` is paid from the
+  retry pool only from 150 slots after purchase, so bots gain nothing by sealing every pack at once.
+- **Mintable when sold.** `buy_pack` reserves tree leaves against the active and standby trees' free leaves minus the
+  9 a tree can lose at rotation, and requires weights that can draw a card, so a paid pack can always be opened.
+  `admin_mint` cannot use reserved leaves.
 - **Only the admin picks a card** (`admin_mint`). Trees are created with the program PDA as creator and delegate,
   `public = false`. Nobody can mint into them outside the program.
 - **Money.**
@@ -42,9 +47,14 @@ residual risks that were accepted, and the rules the backend must follow.
 
 ## Accepted residual risks
 
-- **Outage re-roll.** During an outage of every opener (more than ~3.4 minutes), a player who computed that their
-  pack's cards are bad could avoid sealing it, so that it is redrawn. A refund and a new purchase would give the same
-  edge. The game client opening the pack itself as a backup keeps such outages rare.
+- **Outage re-roll.** The cards of a paid pack are computable from the next slot. If nobody seals or opens it for
+  ~3.4 minutes, it is redrawn, so a player whose pack is bad gains from such an outage. The backend opens
+  immediately, and the game client opens as a backup, so this needs a real outage of both.
+- **Blocking the seal on purpose (unconfirmed).** A player could try to keep their own PendingPack from being sealed
+  for ~512 blocks by filling its per-account compute limit with high-priority transactions, to force a redraw. That
+  would cost on the order of several thousand max-compute transactions outbidding the backend for ~3.4 minutes, far
+  more than a pack's value. Mitigation: the backend sends `open_pack` in the first slot after purchase with a
+  competitive priority fee, and watches for repeated failures.
 - **Block leader.** A colluding leader of the purchase slot could try block contents to influence that slot's hash.
 - **Forks.** If a purchase lands on a fork that loses, a player who saw that fork's hash could try to keep the
   purchase off the winning fork. The player cannot cause forks.
@@ -59,9 +69,9 @@ residual risks that were accepted, and the rules the backend must follow.
 - **Order ids.** Generate `order_id` on the server only (random 16 bytes), never from client input.
 - **Signing.** Co-sign `buy_pack` only for a transaction the server built, with the expected `max_price`. Send it
   yourself.
-- **Opening.** Send `open_pack` as soon as the purchase slot is complete, and retry on failure. If opening must wait,
-  send `seal_pack` within ~3 minutes. A pending pack that fails with `SlotHashUnavailable` gets `redraw_pack`, then
-  `open_pack` one slot later. The game client should also send `open_pack` itself if the backend has not opened the
+- **Opening.** Send `open_pack` as soon as the purchase slot is complete (with a competitive priority fee), and retry
+  on failure. If opening must wait, send `seal_pack` within ~3 minutes. A pending pack that fails with
+  `SlotHashUnavailable` gets `redraw_pack` (signed by the approver), then `open_pack` one slot later. The game client should also send `open_pack` itself if the backend has not opened the
   pack after a few seconds.
 - **Reading events.** Take PackBought / PackMinted only from:
   - a successful, finalized transaction;

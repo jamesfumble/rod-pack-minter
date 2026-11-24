@@ -446,6 +446,36 @@ const commands = {
         console.log('admin_mint', explorer(sig));
     },
 
+    // Moves payments to another pair of test mints (the game backend's devnet $BOOTY / $LUST, so the backend's test-token faucet
+    // pays for packs): a vault per mint, $BOOTY to the shop wallet's token account, $LUST split to the four wallets' token
+    // accounts (10 / 10 / 45 / 25, 10% burned). Only while no pack is pending. Every token account must already exist.
+    async payments(bootyMint, lustMint, shopWallet, team, giveaway, stake, absorption) {
+        if (!absorption) throw new Error('usage: payments <bootyMint> <lustMint> <shopWallet> <team> <giveaway> <stake> <absorption>');
+        const k = K(); const s = state();
+        const cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
+        if (cfg.pendingPacks > 0n) throw new Error(cfg.pendingPacks + ' pack(s) pending: open or refund them first');
+        const ataOf = (owner, mint) => getAssociatedTokenAddressSync(new PublicKey(mint), new PublicKey(owner));
+        const shop = ataOf(shopWallet, bootyMint);
+        const dests = [team, giveaway, stake, absorption].map((o) => ataOf(o, lustMint));
+        for (const a of [shop, ...dests]) if (!(await conn.getAccountInfo(a))) throw new Error('token account ' + a.toBase58() + ' does not exist');
+        for (const mint of [bootyMint, lustMint]) {
+            const vault = c.vaultPda(mint);
+            if (await conn.getAccountInfo(vault)) continue;
+            const i = c.ix('init_vault', {}, { admin: k.admin.publicKey, config: c.configPda(), booty_mint: mint, vault, token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId });
+            console.log('init_vault ' + mint, explorer(await send([i], k.admin)));
+        }
+        const pay = c.ix('set_payment', {}, { admin: k.admin.publicKey, config: c.configPda(), booty_mint: bootyMint, booty_destination: shop, vault: c.vaultPda(bootyMint) });
+        console.log('set_payment', explorer(await send([pay], k.admin)));
+        const lust = c.ix('set_lust_payment', { split_bps: LUST_SPLIT }, { admin: k.admin.publicKey, config: c.configPda(), lust_config: c.lustConfigPda(),
+            lust_mint: lustMint, vault: c.vaultPda(lustMint), team: dests[0], giveaway: dests[1], stake: dests[2], absorption: dests[3], system_program: SystemProgram.programId });
+        console.log('set_lust_payment', explorer(await send([lust], k.admin)));
+        const previous = [...(s.previousPaymentMints || []), { bootyMint: s.bootyMint, lustMint: s.lustMint, until: new Date().toISOString() }];
+        save({ bootyMint, bootyDestination: shop.toBase58(), vault: c.vaultPda(bootyMint).toBase58(), lustMint, lustVault: c.vaultPda(lustMint).toBase58(),
+            lustDestinations: dests.map((d) => d.toBase58()), playerBooty: ataOf(k.player.publicKey, bootyMint).toBase58(), playerLust: ataOf(k.player.publicKey, lustMint).toBase58(),
+            previousPaymentMints: previous, paymentsSwitchedAt: new Date().toISOString() });
+        await commands.status();
+    },
+
     async status() {
         const info = await conn.getAccountInfo(c.configPda());
         if (!info) return console.log('not initialised');

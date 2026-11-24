@@ -58,6 +58,21 @@ collection owner `4jBVfRCTLvRL2NaMy4vf5XFyT21H9ryDBFbeeyBp5zFg`, player `9fUJVnU
 - Expansion 3 (layout without spare bytes) is paused. First Crush is **expansion 4**: 150 $BOOTY or 1,000 $LUST.
 - One pack of each currency was bought and opened.
 
+## Payments moved to the game backend's devnet mints (2026-11-24)
+
+- `node scripts/devnet.mjs payments <bootyMint> <lustMint> <shopWallet> <team> <giveaway> <stake> <absorption>` (no pack
+  pending) moved the program to the backend's devnet test mints: $BOOTY `9eh9f9jRMdNm79aC2gCvQ4t5b8wLY1sTHEMkF3VJbjAC`,
+  $LUST `DYRL4grbJYzbfUViXEqYDxZdzoFULjvFNco1LbBmR1bq`. The backend's test-token faucet now pays for packs.
+  - New vaults: `8rfvtSww5RDvgSx1VsUTgeTaLaKN2vDjHuvDe9EHHBNu` ($BOOTY) and `4DRq2vJbezwW6UGD97E522HtSdNtBC8uXKx7znZA1n89` ($LUST).
+  - $BOOTY goes to the shop wallet's token account; $LUST is split 10/10/45/25 to the backend's team, giveaway, stake and
+    absorption-pool wallets, and 10% is burned.
+  - The older test mints (`DoLiFRNV...`, `43nJYK...`) are listed in `deployments/devnet.json` under `previousPaymentMints`.
+    Their mint authority is the devnet admin; the new mints' authority is the backend's test mint authority.
+- Rehearsal on Surfpool: `init_vault` and `set_payment` passed. `set_lust_payment` fails there with
+  `ConstraintRentExempt` because Surfpool's rent (2,345,520 lamports for the 209-byte LustConfig) is higher than devnet's
+  (1,711,960). It passed on devnet. `buy` / `lust` / `booty` in this script now need tokens in the new mints, which the
+  devnet admin cannot mint.
+
 ## How it was set up (repeatable)
 
 Rehearse on Surfpool first (`surfpool start --network devnet --no-deploy -p 18899`, then the same commands with

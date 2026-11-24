@@ -1,7 +1,7 @@
 {
-  "bootyMint": "DoLiFRNVuuGvKnAAU8WvRy2KZ1FKDCmjSyGdJw7yEBdA",
-  "bootyDestination": "4YQFFaPwniikK9ZBm3ERuJxmi7QTqocaSb3tPBUdJtak",
-  "playerBooty": "GU11eMrvgnXnCTaTKKVRrdo7iVySAyT8uLe3vu7tEmK4",
+  "bootyMint": "9eh9f9jRMdNm79aC2gCvQ4t5b8wLY1sTHEMkF3VJbjAC",
+  "bootyDestination": "A2WMMGnaHGifNPa46GKSGfUGJ3Jz5MxKXuHzx9Zso41R",
+  "playerBooty": "3qwgCQfeVR93pnYy2heS6ZJ1ByV7PMXX2K4fPUrPc8zZ",
   "network": "devnet",
   "programId": "RoD7T8KRzHoTPnbS15uibfKAaqV5bYzcVDW8X9zWmZN",
   "deployedAt": "2026-11-23T22:02:11.332Z",
@@ -22,18 +22,26 @@
   ],
   "lookupTable": "A44typVio7FWNQ8UuQnrW3ApzpUAnJKtDPLXdakULx9C",
   "upgradedAt": "2026-11-24T01:26:51.152Z",
-  "vault": "CLsycEHRCtxwqG6EUxthEPSTi4pb6n5EGQzbYGm4MTLa",
+  "vault": "8rfvtSww5RDvgSx1VsUTgeTaLaKN2vDjHuvDe9EHHBNu",
   "legacyExpansions": [
     1
   ],
-  "lustMint": "43nJYKxndVR4qsBWnUEQygs1WAbQ9X8k3XX1K2LY5Npu",
-  "playerLust": "4b1BV8BLAgLvoDwVqUBUnwSL7swtQjTgPBsodvLPPzAD",
+  "lustMint": "DYRL4grbJYzbfUViXEqYDxZdzoFULjvFNco1LbBmR1bq",
+  "playerLust": "CtBsY7Fue8cw6PXHt4wsTsH5qNxY4AFpbLb2K9CDTWSH",
   "lustDestinations": [
-    "A6gz1aNhsnTzyY5P3nheoPSeryP4aJEp5ji12EUDQJ3j",
-    "62B49TtniD6iLPCsUytxHeFyQVvS5hs234DL4n6DfUwV",
-    "FUZjweFjTGDRMdLw9wzWDKF3zRbeBYT1iZbwhLey4zJP",
-    "3Czb8Hb4xXqVubG2MN7yRq3WBg2ndSeQFnuGe9NGQpV3"
+    "BgNQKpu1uQaPjFpFpkkMo7pwTPwKPGtv5MTvD6NFjx18",
+    "79tw7cg4erfi3nsHLeKyfJ6FrAS5QqXfQRxNFqRKNqKs",
+    "3s2togBnu4VRmF3CAXPZnQiJvY7QVVcHD3HsTRy3nzVw",
+    "Avwc5gN5XxEGw3zKEjNgKkEjQ4rrUByCesD7QVW8qX52"
   ],
-  "lustVault": "3W6jDH2KW32yUZ7TqbRF7omnsZeHkWg6sAUkQvjwa9R1",
-  "lustConfig": "9DvyAEDi3siiN3owrwwr3rg24jjr2qRqQZfdebUS1x9D"
+  "lustVault": "4DRq2vJbezwW6UGD97E522HtSdNtBC8uXKx7znZA1n89",
+  "lustConfig": "9DvyAEDi3siiN3owrwwr3rg24jjr2qRqQZfdebUS1x9D",
+  "previousPaymentMints": [
+    {
+      "bootyMint": "DoLiFRNVuuGvKnAAU8WvRy2KZ1FKDCmjSyGdJw7yEBdA",
+      "lustMint": "43nJYKxndVR4qsBWnUEQygs1WAbQ9X8k3XX1K2LY5Npu",
+      "until": "2026-11-24T17:33:41.583Z"
+    }
+  ],
+  "paymentsSwitchedAt": "2026-11-24T17:33:41.587Z"
 }

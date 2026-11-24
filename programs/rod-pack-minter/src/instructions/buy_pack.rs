@@ -107,9 +107,11 @@ pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 
         )?;
     }
 
-    // The opener's (and, if needed, the sealer's) fee, paid by the player now and handed out by the program later.
-    let (open_fee, seal_fee) = (config.open_fee_lamports, config.seal_fee_lamports);
-    let deposit = open_fee.checked_add(seal_fee).ok_or(ErrorCode::Overflow)?;
+    // The opener's fee plus a retry pool for seals/redraws, paid by the player now and handed out by the program
+    // later. The unused part of the pool comes back to the player when the pack is opened.
+    let (open_fee, retry_fee) = (config.open_fee_lamports, config.retry_fee_lamports);
+    let retry_pool = retry_fee.checked_mul(config.paid_retries as u64).ok_or(ErrorCode::Overflow)?;
+    let deposit = open_fee.checked_add(retry_pool).ok_or(ErrorCode::Overflow)?;
     if deposit > 0 {
         transfer(
             CpiContext::new(
@@ -131,7 +133,8 @@ pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 
     p.sealed = false;
     p.slot_hash = [0u8; 32];
     p.open_fee = open_fee;
-    p.seal_fee = seal_fee;
+    p.retry_fee = retry_fee;
+    p.retry_pool = retry_pool;
     p.bump = ctx.bumps.pending_pack;
     p.weights_regular = weights_regular;
     p.weights_guaranteed = weights_guaranteed;

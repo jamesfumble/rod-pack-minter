@@ -141,7 +141,9 @@ pub fn vault_pda(mint: &Pubkey) -> Pubkey {
 }
 
 pub const OPEN_FEE: u64 = 20_000;
-pub const SEAL_FEE: u64 = 5_000;
+pub const RETRY_FEE: u64 = 5_000;
+pub const PAID_RETRIES: u8 = 3;
+pub const RETRY_POOL: u64 = RETRY_FEE * PAID_RETRIES as u64;
 pub const REFUND_AFTER: i64 = 86_400;
 
 pub fn compute_limit_ix(units: u32) -> Instruction {
@@ -347,7 +349,8 @@ impl Env {
                     tree_max_buffer: buffer,
                     tree_canopy_depth: canopy,
                     open_fee_lamports: OPEN_FEE,
-                    seal_fee_lamports: SEAL_FEE,
+                    retry_fee_lamports: RETRY_FEE,
+                    paid_retries: PAID_RETRIES,
                     refund_after_secs: REFUND_AFTER,
                 },
             }

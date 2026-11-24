@@ -44,7 +44,8 @@ pub struct InitParams {
     pub tree_max_buffer: u32,
     pub tree_canopy_depth: u32,
     pub open_fee_lamports: u64,
-    pub seal_fee_lamports: u64,
+    pub retry_fee_lamports: u64,
+    pub paid_retries: u8,
     pub refund_after_secs: i64,
 }
 
@@ -53,7 +54,7 @@ pub fn handle_initialize(ctx: Context<Initialize>, p: InitParams) -> Result<()> 
     require_plain_mint(&ctx.accounts.booty_mint.to_account_info())?;
     require_keys_neq!(ctx.accounts.booty_destination.key(), ctx.accounts.vault.key(), ErrorCode::VaultNotAllowed);
     validate_tree_size(p.tree_max_depth, p.tree_max_buffer, p.tree_canopy_depth)?;
-    validate_fees(p.open_fee_lamports, p.seal_fee_lamports, p.refund_after_secs)?;
+    validate_fees(p.open_fee_lamports, p.retry_fee_lamports, p.paid_retries, p.refund_after_secs)?;
     let c = &mut ctx.accounts.config;
     c.admin = ctx.accounts.admin.key();
     c.pending_admin = Pubkey::default();
@@ -75,11 +76,12 @@ pub fn handle_initialize(ctx: Context<Initialize>, p: InitParams) -> Result<()> 
     c.mint_authority_bump = ctx.bumps.mint_authority;
     c.vault = ctx.accounts.vault.key();
     c.open_fee_lamports = p.open_fee_lamports;
-    c.seal_fee_lamports = p.seal_fee_lamports;
+    c.retry_fee_lamports = p.retry_fee_lamports;
+    c.paid_retries = p.paid_retries;
     c.refund_after_secs = p.refund_after_secs;
     c.pending_packs = 0;
     c.packs_refunded = 0;
     c.reserved_leaves = 0;
-    c._reserved = [0u8; 56];
+    c._reserved = [0u8; 55];
     Ok(())
 }

@@ -100,8 +100,8 @@ pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
         )?;
     }
 
-    // The opener gets the player's remaining fee deposit; `close = player` then returns the rent to the player.
-    let fees = pending.open_fee.checked_add(pending.seal_fee).ok_or(ErrorCode::Overflow)?;
+    // The opener gets the open fee; `close = player` then returns the rent and the unused retry pool to the player.
+    let fees = pending.open_fee;
     let (expansion_id, order_id, player_key, tree, first_leaf) =
         (pending.expansion_id, pending.order_id, pending.player, config.active_tree, view.num_minted);
     pay_from_pending(&ctx.accounts.pending_pack.to_account_info(), &opener, fees)?;

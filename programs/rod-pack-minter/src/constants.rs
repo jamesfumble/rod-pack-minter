@@ -40,3 +40,5 @@ pub const MIN_TREE_DEPTH: u32 = 3;
 pub const MAX_TREE_DEPTH: u32 = 30;
 /// Upper bound for the per-purchase lamport deposits, so a mistyped fee cannot overcharge players.
 pub const MAX_FEE_LAMPORTS: u64 = 10_000_000;
+/// Upper bound for the number of seals/redraws the player's retry pool pays for.
+pub const MAX_PAID_RETRIES: u8 = 10;

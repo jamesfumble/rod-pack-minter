@@ -39,8 +39,9 @@ pub struct Config {
     /// Lamports the player deposits with every purchase; `open_pack` pays them to whoever sends it, so the opener's
     /// transaction fee is covered by the player.
     pub open_fee_lamports: u64,
-    /// Lamports the player deposits for a separate `seal_pack` (only needed when opening is delayed); paid to the sealer.
-    pub seal_fee_lamports: u64,
+    /// Lamports paid from the player's retry pool for each `seal_pack` / `redraw_pack` (only needed when opening is
+    /// delayed or after an outage).
+    pub retry_fee_lamports: u64,
     /// Seconds after purchase before the admin may refund an unopened pack (so a refund never races a slow opener).
     pub refund_after_secs: i64,
     /// Purchases not yet opened or refunded.
@@ -48,7 +49,10 @@ pub struct Config {
     pub packs_refunded: u64,
     /// Tree leaves promised to pending packs; `buy_pack` only sells when active + standby trees have room for them.
     pub reserved_leaves: u64,
-    pub _reserved: [u8; 56],
+    /// How many seals/redraws the player's deposit pays for (the retry pool is `retry_fee_lamports * paid_retries`).
+    /// The unused part of the pool goes back to the player when the pack is opened.
+    pub paid_retries: u8,
+    pub _reserved: [u8; 55],
 }
 
 impl Config {
@@ -75,9 +79,10 @@ pub struct PendingPack {
     /// Set by `seal_pack` / `open_pack`: the hash the draw uses.
     pub sealed: bool,
     pub slot_hash: [u8; 32],
-    /// The player's lamport deposit for the opener (and sealer), on top of the rent.
+    /// Paid to whoever opens the pack (from the player's deposit, on top of the rent).
     pub open_fee: u64,
-    pub seal_fee: u64,
+    /// Paid per seal/redraw while the retry pool lasts.
+    pub retry_fee: u64,
     pub bump: u8,
     pub weights_regular: [u16; RARITY_COUNT],
     pub weights_guaranteed: [u16; RARITY_COUNT],
@@ -86,6 +91,8 @@ pub struct PendingPack {
     pub rarity_counts: [u16; RARITY_COUNT],
     /// How many times `redraw_pack` gave this pack a new purchase slot (after an outage).
     pub redraws: u8,
+    /// What is left of the player's retry deposit; returned to the player when the PendingPack closes.
+    pub retry_pool: u64,
 }
 
 /// One card expansion (First Crush = 1). PDA ["expansion", id as u16 LE].
@@ -247,6 +254,8 @@ pub struct PackRedrawn {
     pub old_slot: u64,
     pub new_slot: u64,
     pub redraws: u8,
+    /// What is left of the player's retry deposit; returned to the player when the PendingPack closes.
+    pub retry_pool: u64,
 }
 
 #[event]

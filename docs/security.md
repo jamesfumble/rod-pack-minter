@@ -31,10 +31,12 @@ residual risks that were accepted, and the rules the backend must follow.
     destination.
   - Only plain mints are accepted (82 bytes, no Token-2022 extensions).
 - **The player pays every fee.**
-  - The PendingPack holds the player's deposit (`open_fee + seal_fee`). It is paid to whoever opens or seals (or to
-    the admin for a refund).
-  - The rent goes back to the player.
-  - Measured: player net 35-36k lamports per pack; opener net +14-20k.
+  - The PendingPack holds the player's deposit: `open_fee` for whoever opens (or the admin, for a refund) and a retry
+    pool of `retry_fee x paid_retries` that pays each seal or redraw while it lasts.
+  - The rent and the unused pool go back to the player.
+  - Measured: player net 30,000 lamports per pack (devnet fees); opener net +9k to +15k.
+  - `redraw_pack` is only accepted when opening has become impossible (unsealed and the purchase slot hash has left
+    SlotHashes); otherwise it fails with `PackStillOpenable` / `AlreadySealed`.
 - **Set-up.** Only the upgrade authority can `initialize`. Every admin instruction checks `has_one = admin`. The
   admin change is two-step.
 

@@ -60,12 +60,13 @@ fn purchase_then_open_and_the_player_pays_every_fee() {
     let c = env.config();
     assert_eq!((c.packs_sold, c.cards_minted, c.pending_packs, c.reserved_leaves), (1, 6, 0, 0));
 
-    // Fees: the player paid the buy transaction (2 signatures) plus the opener's deposit; the PendingPack rent came back.
+    // Fees: the player paid the buy transaction (2 signatures) and the open fee; the rent and the unused retry pool
+    // came back.
     let player_spent = sol_before - env.svm.get_balance(&player).unwrap();
-    assert_eq!(player_spent, 10_000 + OPEN_FEE + SEAL_FEE);
+    assert_eq!(player_spent, 10_000 + OPEN_FEE);
     // The opener paid its 5,000-lamport fee and was repaid the deposit: it ends up ahead, not out of pocket.
     let opener_net = env.svm.get_balance(&opener).unwrap() as i64 - opener_before as i64;
-    assert_eq!(opener_net, (OPEN_FEE + SEAL_FEE) as i64 - 5_000);
+    assert_eq!(opener_net, OPEN_FEE as i64 - 5_000);
     println!("player paid {player_spent} lamports in total; opener net +{opener_net}");
 }
 
@@ -104,7 +105,7 @@ fn a_sealed_pack_keeps_its_cards_after_slot_hashes_expire() {
     let before = env.svm.get_balance(&sealer.pubkey()).unwrap();
     let ix = env.seal_ix(&sealer.pubkey(), &order);
     send(&mut env.svm, &[ix], &sealer, &[]).expect("seal_pack");
-    assert_eq!(env.svm.get_balance(&sealer.pubkey()).unwrap() - before + 5_000, SEAL_FEE, "sealer repaid from the deposit");
+    assert_eq!(env.svm.get_balance(&sealer.pubkey()).unwrap() - before + 5_000, RETRY_FEE, "sealer repaid from the retry pool");
     let ix = env.seal_ix(&sealer.pubkey(), &order);
     assert_err(send(&mut env.svm, &[ix], &sealer, &[]), "AlreadySealed");
 
@@ -136,7 +137,7 @@ fn a_pack_nobody_opened_in_time_is_redrawn_not_refunded() {
     let before = env.svm.get_balance(&caller.pubkey()).unwrap();
     let ix = env.redraw_ix(&caller.pubkey(), &order);
     send(&mut env.svm, &[ix], &caller, &[]).expect("redraw_pack");
-    assert_eq!(env.svm.get_balance(&caller.pubkey()).unwrap() + 5_000 - before, SEAL_FEE);
+    assert_eq!(env.svm.get_balance(&caller.pubkey()).unwrap() + 5_000 - before, RETRY_FEE);
     let new_slot = current_slot(&env.svm);
     let p = env.pending(&order).unwrap();
     assert_eq!((p.purchase_slot, p.redraws, p.sealed), (new_slot, 1, false));
@@ -148,6 +149,31 @@ fn a_pack_nobody_opened_in_time_is_redrawn_not_refunded() {
     assert_eq!(pack_event(&meta).card_ids, expected_cards(&env, &slot_hash_of(new_slot), &order, new_slot, id));
     assert_eq!(env.num_minted(&tree), 6);
     assert_eq!(token_amount(&env.svm, &env.shop_token), 150 * BOOTY);
+}
+
+#[test]
+fn the_retry_pool_pays_three_redraws_and_the_rest_returns_to_the_player() {
+    let (mut env, id, _) = Env::ready();
+    let sol_before = env.svm.get_balance(&env.player.pubkey()).unwrap();
+    let order = env.buy(id, 150 * BOOTY).unwrap();
+    assert_eq!(env.pending(&order).unwrap().retry_pool, RETRY_POOL);
+    let caller = Keypair::new();
+    env.svm.airdrop(&caller.pubkey(), 1_000_000_000).unwrap();
+    // Four outages in a row: the first three redraws are paid from the pool, the fourth is not (pool empty).
+    for round in 0..4u64 {
+        let slot = env.pending(&order).unwrap().purchase_slot;
+        warp(&mut env.svm, slot + 600);
+        let before = env.svm.get_balance(&caller.pubkey()).unwrap();
+        let ix = env.redraw_ix(&caller.pubkey(), &order);
+        send(&mut env.svm, &[ix], &caller, &[]).expect("redraw");
+        let paid = env.svm.get_balance(&caller.pubkey()).unwrap() + 5_000 - before;
+        assert_eq!(paid, if round < 3 { RETRY_FEE } else { 0 }, "round {round}");
+    }
+    let p = env.pending(&order).unwrap();
+    assert_eq!((p.redraws, p.retry_pool), (4, 0));
+    env.next_slot_and_open(&order, id).expect("opens after four redraws");
+    // The player paid the buy transaction, the open fee and the three paid redraws; nothing else.
+    assert_eq!(sol_before - env.svm.get_balance(&env.player.pubkey()).unwrap(), 10_000 + OPEN_FEE + RETRY_POOL);
 }
 
 #[test]
@@ -199,10 +225,10 @@ fn refund_is_admin_only_and_returns_price_and_rent() {
     env.run_admin(ix).expect("admin refund");
     assert_eq!(token_amount(&env.svm, &env.player_token), booty_before, "price back");
     assert!(env.pending(&order).is_none());
-    // The player paid the buy transaction, their own rejected refund attempt, and the deposit (now the admin's, for
-    // sending the refund); the rent came back.
-    assert_eq!(sol_before - env.svm.get_balance(&env.player.pubkey()).unwrap(), 10_000 + 5_000 + OPEN_FEE + SEAL_FEE);
-    assert_eq!(env.svm.get_balance(&env.admin.pubkey()).unwrap() + 5_000 - admin_before, OPEN_FEE + SEAL_FEE);
+    // The player paid the buy transaction, their own rejected refund attempt, and the open fee (now the admin's, for
+    // sending the refund); the rent and the retry pool came back.
+    assert_eq!(sol_before - env.svm.get_balance(&env.player.pubkey()).unwrap(), 10_000 + 5_000 + OPEN_FEE);
+    assert_eq!(env.svm.get_balance(&env.admin.pubkey()).unwrap() + 5_000 - admin_before, OPEN_FEE);
     let c = env.config();
     assert_eq!((c.pending_packs, c.packs_refunded, c.reserved_leaves), (0, 1, 0));
     let s = current_slot(&env.svm);
@@ -494,7 +520,7 @@ fn only_the_admin_changes_settings_and_cards() {
     assert_err(send(&mut env.svm, &[ix], &intruder, &[]), "Unauthorized");
     for data in [
         rod_pack_minter::instruction::SetApprover { approver: intruder.pubkey() }.data(),
-        rod_pack_minter::instruction::SetFees { open_fee_lamports: 0, seal_fee_lamports: 0, refund_after_secs: 600 }.data(),
+        rod_pack_minter::instruction::SetFees { open_fee_lamports: 0, retry_fee_lamports: 0, paid_retries: 0, refund_after_secs: 600 }.data(),
         rod_pack_minter::instruction::SetPaused { paused: true }.data(),
     ] {
         let ix = Instruction::new_with_bytes(
@@ -516,9 +542,11 @@ fn admin_safeguards() {
         assert_err(env.run_admin(ix), "BadTreeAccount");
     }
     // Fees capped, refund delay at least 10 minutes.
-    let ix = env.admin_ix(rod_pack_minter::instruction::SetFees { open_fee_lamports: MAX_FEE_LAMPORTS + 1, seal_fee_lamports: 0, refund_after_secs: 600 }.data());
+    let ix = env.admin_ix(rod_pack_minter::instruction::SetFees { open_fee_lamports: MAX_FEE_LAMPORTS + 1, retry_fee_lamports: 0, paid_retries: 0, refund_after_secs: 600 }.data());
     assert_err(env.run_admin(ix), "FeeTooHigh");
-    let ix = env.admin_ix(rod_pack_minter::instruction::SetFees { open_fee_lamports: 0, seal_fee_lamports: 0, refund_after_secs: 60 }.data());
+    let ix = env.admin_ix(rod_pack_minter::instruction::SetFees { open_fee_lamports: 0, retry_fee_lamports: 0, paid_retries: MAX_PAID_RETRIES + 1, refund_after_secs: 600 }.data());
+    assert_err(env.run_admin(ix), "FeeTooHigh");
+    let ix = env.admin_ix(rod_pack_minter::instruction::SetFees { open_fee_lamports: 0, retry_fee_lamports: 0, paid_retries: 0, refund_after_secs: 60 }.data());
     assert_err(env.run_admin(ix), "TooEarlyToRefund");
     // The collection is locked once cards exist.
     env.buy_and_open(id, 150 * BOOTY).unwrap();
@@ -563,7 +591,7 @@ fn migrate_config_extends_a_v1_config() {
     let migrate = |env: &Env, admin: &Pubkey| {
         Instruction::new_with_bytes(
             rod_pack_minter::ID,
-            &rod_pack_minter::instruction::MigrateConfig { open_fee_lamports: 7, seal_fee_lamports: 8, refund_after_secs: 3600 }.data(),
+            &rod_pack_minter::instruction::MigrateConfig { open_fee_lamports: 7, retry_fee_lamports: 8, paid_retries: 2, refund_after_secs: 3600 }.data(),
             rod_pack_minter::accounts::MigrateConfig { admin: *admin, config: config_pda(), system_program: system_program::ID }.to_account_metas(None),
         )
     };
@@ -574,7 +602,7 @@ fn migrate_config_extends_a_v1_config() {
     let ix = migrate(&env, &env.admin.pubkey());
     env.run_admin(ix).expect("migrate");
     let c = env.config();
-    assert_eq!((c.open_fee_lamports, c.seal_fee_lamports, c.refund_after_secs, c.vault), (7, 8, 3600, Pubkey::default()));
+    assert_eq!((c.open_fee_lamports, c.retry_fee_lamports, c.paid_retries, c.refund_after_secs, c.vault), (7, 8, 2, 3600, Pubkey::default()));
     assert_eq!(c.admin, env.admin.pubkey(), "v1 fields kept");
     let ix = migrate(&env, &env.admin.pubkey());
     assert_err(env.run_admin(ix), "AlreadyMigrated");

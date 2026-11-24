@@ -11,8 +11,8 @@ use crate::{
 /// Support tool, not part of normal operation (failed transactions are retried and outages are handled by
 /// `redraw_pack`): the admin returns the price of an unopened pack. Admin-only on purpose: the cards of any paid pack are public from the slot after purchase, so a refund
 /// the player could trigger would let them keep good packs and return bad ones. The price goes to the player's own
-/// $BOOTY account, the PendingPack rent back to the player, and the player's fee deposit to the admin (who sent the
-/// transaction), so the player still pays every fee.
+/// $BOOTY account, the open fee to the admin (who sent the transaction instead of an opener), and the rent and the
+/// unused retry pool back to the player.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct RefundPack<'info> {
@@ -66,7 +66,8 @@ pub fn handle_refund_pack(ctx: Context<RefundPack>) -> Result<()> {
         )?;
     }
     let (expansion_id, order_id, player, pack_size) = (pending.expansion_id, pending.order_id, pending.player, pending.pack_size);
-    let fees = pending.open_fee.checked_add(pending.seal_fee).ok_or(ErrorCode::Overflow)?;
+    // The admin sent this transaction instead of an opener: it gets the open fee; the rest returns to the player.
+    let fees = pending.open_fee;
     pay_from_pending(&ctx.accounts.pending_pack.to_account_info(), &ctx.accounts.admin.to_account_info(), fees)?;
     let config = &mut ctx.accounts.config;
     config.pending_packs = config.pending_packs.checked_sub(1).ok_or(ErrorCode::Overflow)?;

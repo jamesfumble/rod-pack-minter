@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::instructions::seal::{lookup_slot_hash, pay_from_pending, SlotLookup};
+use crate::instructions::seal::{lookup_slot_hash, pay_retry, SlotLookup};
 use crate::{
     constants::*,
     error::ErrorCode,
@@ -11,7 +11,7 @@ use crate::{
 /// sealed or opened it while its purchase slot's hash was in SlotHashes (~512 slots, ~3.4 minutes, i.e. an outage of
 /// every opener). The price stays in the vault; the cards now come from the hash of the current slot, which does not
 /// exist yet, so the redraw is as fair as a new purchase. Anyone may call it (the backend does so automatically); the
-/// caller receives the player's seal deposit (once), so the player still pays every fee.
+/// caller is paid one retry fee from the player's retry pool (while it lasts), so the player still pays the fees.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct RedrawPack<'info> {
@@ -36,15 +36,14 @@ pub fn handle_redraw_pack(ctx: Context<RedrawPack>) -> Result<()> {
     }
     let old_slot = pending.purchase_slot;
     let new_slot = Clock::get()?.slot;
-    let fee = pending.seal_fee;
 
     let key = ctx.accounts.pending_pack.key();
     let p = &mut ctx.accounts.pending_pack;
     p.purchase_slot = new_slot;
-    p.seal_fee = 0;
     p.redraws = p.redraws.saturating_add(1);
     let redraws = p.redraws;
-    pay_from_pending(&ctx.accounts.pending_pack.to_account_info(), &ctx.accounts.caller.to_account_info(), fee)?;
-    emit_cpi!(PackRedrawn { pending_pack: key, old_slot, new_slot, redraws });
+    pay_retry(&mut ctx.accounts.pending_pack, &ctx.accounts.caller.to_account_info())?;
+    let retry_pool = ctx.accounts.pending_pack.retry_pool;
+    emit_cpi!(PackRedrawn { pending_pack: key, old_slot, new_slot, redraws, retry_pool });
     Ok(())
 }

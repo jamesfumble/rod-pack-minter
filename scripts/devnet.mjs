@@ -30,8 +30,9 @@ const CARD_LIST = process.env.CARD_LIST || 'C:/Projects/first-crush-nft-collecti
 const SOLANA = process.env.SOLANA_BIN || join(homedir(), '.local', 'share', 'solana', 'install', 'active_release', 'bin', process.platform === 'win32' ? 'solana.exe' : 'solana');
 const BOOTY = 1_000_000_000n; // 9 decimals
 const TREE = { depth: 14, buffer: 64, canopy: 8 };
-// The player's per-purchase deposit for the opener (and sealer), and the refund delay.
-const FEES = { open: 20_000n, seal: 5_000n, refundAfterSecs: 86_400n };
+// The player's per-purchase deposit: the open fee plus a retry pool (retry fee x paid retries, the unused part is
+// returned at opening), and the delay before an admin refund.
+const FEES = { open: 20_000n, retry: 5_000n, paidRetries: 3, refundAfterSecs: 86_400n };
 const SLOT_HASHES = 'SysvarS1otHashes111111111111111111111111111';
 const ROYALTY_CREATOR = 'GSqgkoPSWXgyovHvpqZgdW7SQ6P23dMH5dweWMNMLbGD';
 
@@ -164,7 +165,7 @@ const commands = {
         const k = K(); const s = state();
         let cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
         if (cfg.v1) {
-            const i = c.ix('migrate_config', { open_fee_lamports: FEES.open, seal_fee_lamports: FEES.seal, refund_after_secs: FEES.refundAfterSecs },
+            const i = c.ix('migrate_config', { open_fee_lamports: FEES.open, retry_fee_lamports: FEES.retry, paid_retries: FEES.paidRetries, refund_after_secs: FEES.refundAfterSecs },
                 { admin: k.admin.publicKey, config: c.configPda(), system_program: SystemProgram.programId });
             console.log('migrate_config', explorer(await send([i], k.admin)));
         }
@@ -182,11 +183,19 @@ const commands = {
         await commands.status();
     },
 
+    // Apply FEES to an existing config (devnet was migrated before the retry pool existed).
+    async fees() {
+        const k = K();
+        const i = c.ix('set_fees', { open_fee_lamports: FEES.open, retry_fee_lamports: FEES.retry, paid_retries: FEES.paidRetries, refund_after_secs: FEES.refundAfterSecs },
+            { admin: k.admin.publicKey, config: c.configPda() });
+        console.log('set_fees', explorer(await send([i], k.admin)));
+    },
+
     async init() {
         const k = K(); const s = state();
         if (await conn.getAccountInfo(c.configPda())) return console.log('already initialised');
         const params = { approver: k.approver.publicKey, tree_funder: k.funder.publicKey, tree_max_depth: TREE.depth, tree_max_buffer: TREE.buffer, tree_canopy_depth: TREE.canopy,
-            open_fee_lamports: FEES.open, seal_fee_lamports: FEES.seal, refund_after_secs: FEES.refundAfterSecs };
+            open_fee_lamports: FEES.open, retry_fee_lamports: FEES.retry, paid_retries: FEES.paidRetries, refund_after_secs: FEES.refundAfterSecs };
         const i = c.ix('initialize', { params }, {
             admin: k.admin.publicKey, config: c.configPda(), mint_authority: c.mintAuthorityPda(), program: c.PROGRAM_ID, program_data: c.programDataPda(),
             booty_mint: s.bootyMint, booty_destination: s.bootyDestination, vault: c.vaultPda(s.bootyMint), token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId });
@@ -380,7 +389,7 @@ const commands = {
         const cfg = c.decodeConfig(info.data);
         console.log({ admin: cfg.admin.toBase58(), approver: cfg.approver.toBase58(), treeFunder: cfg.treeFunder.toBase58(), paused: cfg.paused,
             activeTree: cfg.activeTree.toBase58(), standbyTree: cfg.standbyTree.toBase58(), treesCreated: cfg.treesCreated, packsSold: cfg.packsSold.toString(), cardsMinted: cfg.cardsMinted.toString(),
-            vault: cfg.vault?.toBase58(), openFee: cfg.openFee?.toString(), sealFee: cfg.sealFee?.toString(), refundAfterSecs: cfg.refundAfterSecs?.toString(), pendingPacks: cfg.pendingPacks?.toString(), packsRefunded: cfg.packsRefunded?.toString() });
+            vault: cfg.vault?.toBase58(), openFee: cfg.openFee?.toString(), retryFee: cfg.retryFee?.toString(), paidRetries: cfg.paidRetries, reservedLeaves: cfg.reservedLeaves?.toString(), refundAfterSecs: cfg.refundAfterSecs?.toString(), pendingPacks: cfg.pendingPacks?.toString(), packsRefunded: cfg.packsRefunded?.toString() });
         for (const t of [cfg.activeTree, cfg.standbyTree]) {
             if (t.equals(PublicKey.default)) continue;
             const tc = c.treeConfigInfo((await conn.getAccountInfo(c.treeConfigPda(t))).data);

@@ -26,8 +26,8 @@ pub mod rod_pack_minter {
     pub fn initialize(ctx: Context<Initialize>, params: InitParams) -> Result<()> {
         instructions::initialize::handle_initialize(ctx, params)
     }
-    pub fn migrate_config(ctx: Context<MigrateConfig>, open_fee_lamports: u64, seal_fee_lamports: u64, refund_after_secs: i64) -> Result<()> {
-        instructions::admin::handle_migrate_config(ctx, open_fee_lamports, seal_fee_lamports, refund_after_secs)
+    pub fn migrate_config(ctx: Context<MigrateConfig>, open_fee_lamports: u64, retry_fee_lamports: u64, paid_retries: u8, refund_after_secs: i64) -> Result<()> {
+        instructions::admin::handle_migrate_config(ctx, open_fee_lamports, retry_fee_lamports, paid_retries, refund_after_secs)
     }
     pub fn init_vault(ctx: Context<InitVault>) -> Result<()> {
         instructions::admin::handle_init_vault(ctx)
@@ -35,8 +35,8 @@ pub mod rod_pack_minter {
     pub fn set_destination(ctx: Context<SetDestination>) -> Result<()> {
         instructions::admin::handle_set_destination(ctx)
     }
-    pub fn set_fees(ctx: Context<AdminOnly>, open_fee_lamports: u64, seal_fee_lamports: u64, refund_after_secs: i64) -> Result<()> {
-        instructions::admin::handle_set_fees(ctx, open_fee_lamports, seal_fee_lamports, refund_after_secs)
+    pub fn set_fees(ctx: Context<AdminOnly>, open_fee_lamports: u64, retry_fee_lamports: u64, paid_retries: u8, refund_after_secs: i64) -> Result<()> {
+        instructions::admin::handle_set_fees(ctx, open_fee_lamports, retry_fee_lamports, paid_retries, refund_after_secs)
     }
 
     // Admin: whole program

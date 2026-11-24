@@ -64,6 +64,14 @@ pub fn seal(pending: &mut PendingPack, slot_hashes: &AccountInfo) -> Result<()> 
     Ok(())
 }
 
+/// Pays one retry (seal or redraw) from the player's retry pool, while it lasts. Returns the amount paid.
+pub fn pay_retry(pending: &mut Account<PendingPack>, to: &AccountInfo) -> Result<u64> {
+    let amount = pending.retry_fee.min(pending.retry_pool);
+    pending.retry_pool -= amount;
+    pay_from_pending(&pending.to_account_info(), to, amount)?;
+    Ok(amount)
+}
+
 /// Moves lamports out of a program-owned account (the PendingPack) to `to`.
 pub fn pay_from_pending(pending: &AccountInfo, to: &AccountInfo, lamports: u64) -> Result<()> {
     if lamports == 0 {
@@ -75,7 +83,7 @@ pub fn pay_from_pending(pending: &AccountInfo, to: &AccountInfo, lamports: u64) 
 }
 
 /// Anyone may seal a pack, e.g. when opening has to wait. It only stores the purchase slot's hash, so the cards are
-/// fixed and SlotHashes expiry no longer matters. The sealer receives the player's seal deposit.
+/// fixed and SlotHashes expiry no longer matters. The sealer is paid one retry fee from the player's retry pool.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct SealPack<'info> {
@@ -94,9 +102,7 @@ pub struct SealPack<'info> {
 pub fn handle_seal_pack(ctx: Context<SealPack>) -> Result<()> {
     let key = ctx.accounts.pending_pack.key();
     seal(&mut ctx.accounts.pending_pack, &ctx.accounts.slot_hashes.to_account_info())?;
-    let fee = ctx.accounts.pending_pack.seal_fee;
-    ctx.accounts.pending_pack.seal_fee = 0;
-    pay_from_pending(&ctx.accounts.pending_pack.to_account_info(), &ctx.accounts.sealer.to_account_info(), fee)?;
+    pay_retry(&mut ctx.accounts.pending_pack, &ctx.accounts.sealer.to_account_info())?;
     emit_cpi!(PackSealed { pending_pack: key, slot_hash: ctx.accounts.pending_pack.slot_hash });
     Ok(())
 }

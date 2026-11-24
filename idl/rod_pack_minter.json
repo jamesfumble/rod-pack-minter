@@ -831,8 +831,12 @@
           "type": "u64"
         },
         {
-          "name": "seal_fee_lamports",
+          "name": "retry_fee_lamports",
           "type": "u64"
+        },
+        {
+          "name": "paid_retries",
+          "type": "u8"
         },
         {
           "name": "refund_after_secs",
@@ -1557,8 +1561,12 @@
           "type": "u64"
         },
         {
-          "name": "seal_fee_lamports",
+          "name": "retry_fee_lamports",
           "type": "u64"
+        },
+        {
+          "name": "paid_retries",
+          "type": "u8"
         },
         {
           "name": "refund_after_secs",
@@ -2651,9 +2659,10 @@
             "type": "u64"
           },
           {
-            "name": "seal_fee_lamports",
+            "name": "retry_fee_lamports",
             "docs": [
-              "Lamports the player deposits for a separate `seal_pack` (only needed when opening is delayed); paid to the sealer."
+              "Lamports paid from the player's retry pool for each `seal_pack` / `redraw_pack` (only needed when opening is",
+              "delayed or after an outage)."
             ],
             "type": "u64"
           },
@@ -2683,11 +2692,19 @@
             "type": "u64"
           },
           {
+            "name": "paid_retries",
+            "docs": [
+              "How many seals/redraws the player's deposit pays for (the retry pool is `retry_fee_lamports * paid_retries`).",
+              "The unused part of the pool goes back to the player when the pack is opened."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "_reserved",
             "type": {
               "array": [
                 "u8",
-                56
+                55
               ]
             }
           }
@@ -2914,8 +2931,12 @@
             "type": "u64"
           },
           {
-            "name": "seal_fee_lamports",
+            "name": "retry_fee_lamports",
             "type": "u64"
+          },
+          {
+            "name": "paid_retries",
+            "type": "u8"
           },
           {
             "name": "refund_after_secs",
@@ -3036,6 +3057,13 @@
           {
             "name": "redraws",
             "type": "u8"
+          },
+          {
+            "name": "retry_pool",
+            "docs": [
+              "What is left of the player's retry deposit; returned to the player when the PendingPack closes."
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -3159,12 +3187,15 @@
           {
             "name": "open_fee",
             "docs": [
-              "The player's lamport deposit for the opener (and sealer), on top of the rent."
+              "Paid to whoever opens the pack (from the player's deposit, on top of the rent)."
             ],
             "type": "u64"
           },
           {
-            "name": "seal_fee",
+            "name": "retry_fee",
+            "docs": [
+              "Paid per seal/redraw while the retry pool lasts."
+            ],
             "type": "u64"
           },
           {
@@ -3208,6 +3239,13 @@
               "How many times `redraw_pack` gave this pack a new purchase slot (after an outage)."
             ],
             "type": "u8"
+          },
+          {
+            "name": "retry_pool",
+            "docs": [
+              "What is left of the player's retry deposit; returned to the player when the PendingPack closes."
+            ],
+            "type": "u64"
           }
         ]
       }

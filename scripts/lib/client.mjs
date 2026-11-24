@@ -129,7 +129,7 @@ export function decodeConfig(data) {
         bootyMint: r.key(), bootyDestination: r.key(), activeTree: r.key(), standbyTree: r.key(),
         treeMaxDepth: r.u32(), treeMaxBuffer: r.u32(), treeCanopyDepth: r.u32(), treesCreated: r.u32(),
         nextExpansionId: r.u16(), packsSold: r.u64(), cardsMinted: r.u64(), bump: r.u8(), mintAuthorityBump: r.u8(),
-        ...(data.length > 301 ? { vault: r.key(), openFee: r.u64(), sealFee: r.u64(), refundAfterSecs: r.i64(), pendingPacks: r.u64(), packsRefunded: r.u64() } : { v1: true }),
+        ...(data.length > 301 ? { vault: r.key(), openFee: r.u64(), retryFee: r.u64(), refundAfterSecs: r.i64(), pendingPacks: r.u64(), packsRefunded: r.u64(), reservedLeaves: r.u64(), paidRetries: r.u8() } : { v1: true }),
     };
 }
 
@@ -137,7 +137,9 @@ export function decodePendingPack(data) {
     const r = new Reader(data);
     return {
         player: r.key(), expansionId: r.u16(), orderId: Buffer.from(r.b.subarray(r.o, (r.o += 16))), price: r.u64(), packSize: r.u8(),
-        purchaseSlot: r.u64(), purchasedAt: r.i64(), sealed: r.bool(), slotHash: Buffer.from(r.b.subarray(r.o, (r.o += 32))), openFee: r.u64(), sealFee: r.u64(),
+        purchaseSlot: r.u64(), purchasedAt: r.i64(), sealed: r.bool(), slotHash: Buffer.from(r.b.subarray(r.o, (r.o += 32))), openFee: r.u64(), retryFee: r.u64(),
+        bump: r.u8(), weightsRegular: [r.u16(), r.u16(), r.u16(), r.u16()], weightsGuaranteed: [r.u16(), r.u16(), r.u16(), r.u16()],
+        rarityCounts: [r.u16(), r.u16(), r.u16(), r.u16()], redraws: r.u8(), retryPool: r.u64(),
     };
 }
 

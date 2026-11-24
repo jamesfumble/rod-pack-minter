@@ -76,6 +76,10 @@ export const configPda = () => pda([Buffer.from('config')]);
 export const expansionPda = (id) => pda([Buffer.from('expansion'), u16le(id)]);
 export const cardsPda = (id) => pda([Buffer.from('cards'), u16le(id)]);
 export const mintAuthorityPda = () => pda([Buffer.from('mint_authority')]);
+export const lustConfigPda = () => pda([Buffer.from('lust')]);
+export const CURRENCY = { booty: 0, lust: 1 };
+/** Size of an Expansion account in the current layout (two prices + discount percent). */
+export const EXPANSION_LEN = 342;
 export const vaultPda = (mint) => pda([Buffer.from('vault'), new PublicKey(mint).toBuffer()]);
 export const pendingPda = (player, orderId) => pda([Buffer.from('pack'), new PublicKey(player).toBuffer(), Buffer.from(orderId)]);
 export const eventAuthorityPda = () => pda([Buffer.from('__event_authority')]);
@@ -139,7 +143,7 @@ export function decodePendingPack(data) {
         player: r.key(), expansionId: r.u16(), orderId: Buffer.from(r.b.subarray(r.o, (r.o += 16))), price: r.u64(), packSize: r.u8(),
         purchaseSlot: r.u64(), purchasedAt: r.i64(), sealed: r.bool(), slotHash: Buffer.from(r.b.subarray(r.o, (r.o += 32))), openFee: r.u64(), retryFee: r.u64(),
         bump: r.u8(), weightsRegular: [r.u16(), r.u16(), r.u16(), r.u16()], weightsGuaranteed: [r.u16(), r.u16(), r.u16(), r.u16()],
-        rarityCounts: [r.u16(), r.u16(), r.u16(), r.u16()], redraws: r.u8(), retryPool: r.u64(),
+        rarityCounts: [r.u16(), r.u16(), r.u16(), r.u16()], redraws: r.u8(), retryPool: r.u64(), currency: r.u8(),
     };
 }
 
@@ -149,7 +153,10 @@ export function decodeExpansion(data) {
         id: r.u16(), paused: r.bool(), name: r.str(), collectionMint: r.key(), creator: r.key(), royaltyBps: r.u16(),
         symbol: r.str(), uriPrefix: r.str(), packSize: r.u8(),
         weightsRegular: [r.u16(), r.u16(), r.u16(), r.u16()], weightsGuaranteed: [r.u16(), r.u16(), r.u16(), r.u16()],
-        price: r.u64(), discountPrice: r.u64(), discountStart: r.i64(), discountEnd: r.i64(), saleStart: r.i64(), saleEnd: r.i64(),
+        ...(data.length === EXPANSION_LEN
+            ? { priceBooty: r.u64(), priceLust: r.u64(), discountPercent: r.u8() }
+            : { legacy: true, priceBooty: r.u64(), priceLust: (r.u64(), 0n), discountPercent: 0 }),
+        discountStart: r.i64(), discountEnd: r.i64(), saleStart: r.i64(), saleEnd: r.i64(),
         packsSold: r.u64(), cardsMinted: r.u64(),
     };
 }
@@ -205,8 +212,8 @@ export function decodePackMinted(buf) {
     const orderId = buf.subarray(o, o + 16).toString('hex'); o += 16;
     const player = key(); const tree = key(); const firstLeafIndex = u64();
     const n = u32(); const cardIds = []; for (let i = 0; i < n; i++) cardIds.push(u16());
-    const price = u64(); const seed = buf.subarray(o, o + 32).toString('hex');
-    return { expansionId, orderId, player, tree, firstLeafIndex, cardIds, price, seed };
+    const currency = buf[o++]; const price = u64(); const seed = buf.subarray(o, o + 32).toString('hex');
+    return { expansionId, orderId, player, tree, firstLeafIndex, cardIds, currency, price, seed };
 }
 
 /** Bubblegum asset id of a leaf. */

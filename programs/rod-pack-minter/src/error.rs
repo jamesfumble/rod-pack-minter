@@ -96,4 +96,14 @@ pub enum ErrorCode {
     LockedWhilePending,
     #[msg("Only the backend approver or the admin may redraw a pack")]
     NotRedrawer,
+    #[msg("This pack is not sold for this currency")]
+    NotForSale,
+    #[msg("Unknown currency, or $LUST payments are not set up")]
+    BadCurrency,
+    #[msg("The $LUST split must not exceed 100%")]
+    BadSplit,
+    #[msg("Wrong payout account")]
+    WrongDestination,
+    #[msg("A discount is 1-99 percent with a valid period")]
+    BadDiscountPercent,
 }

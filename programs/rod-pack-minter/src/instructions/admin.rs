@@ -3,7 +3,7 @@ use anchor_lang::system_program::{transfer, Transfer};
 use anchor_lang::Discriminator;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::{constants::*, error::ErrorCode, instructions::initialize::require_plain_mint, state::Config};
+use crate::{constants::*, error::ErrorCode, instructions::initialize::require_plain_mint, state::{Config, LustConfig}};
 
 #[derive(Accounts)]
 pub struct AdminOnly<'info> {
@@ -144,6 +144,50 @@ pub struct SetDestination<'info> {
 pub fn handle_set_destination(ctx: Context<SetDestination>) -> Result<()> {
     require_keys_neq!(ctx.accounts.booty_destination.key(), ctx.accounts.config.vault, ErrorCode::VaultNotAllowed);
     ctx.accounts.config.booty_destination = ctx.accounts.booty_destination.key();
+    Ok(())
+}
+
+/// Sets up or changes $LUST payments: the mint (its vault must exist: `init_vault`), the four split destinations
+/// (team, giveaway, stake, absorption pool) and their shares in basis points; the rest of every $LUST price is burned.
+/// The mint can only change while no pack is pending.
+#[derive(Accounts)]
+pub struct SetLustPayment<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ ErrorCode::Unauthorized)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(init_if_needed, payer = admin, space = 8 + LustConfig::INIT_SPACE, seeds = [LUST_SEED], bump)]
+    pub lust_config: Box<Account<'info, LustConfig>>,
+    pub lust_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(seeds = [VAULT_SEED, lust_mint.key().as_ref()], bump, token::mint = lust_mint, token::authority = config)]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(token::mint = lust_mint)]
+    pub team: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(token::mint = lust_mint)]
+    pub giveaway: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(token::mint = lust_mint)]
+    pub stake: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(token::mint = lust_mint)]
+    pub absorption: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_set_lust_payment(ctx: Context<SetLustPayment>, split_bps: [u16; LUST_SPLITS]) -> Result<()> {
+    require!(split_bps.iter().map(|b| *b as u32).sum::<u32>() <= 10_000, ErrorCode::BadSplit);
+    require_plain_mint(&ctx.accounts.lust_mint.to_account_info())?;
+    let mint = ctx.accounts.lust_mint.key();
+    let l = &ctx.accounts.lust_config;
+    require!(l.mint == Pubkey::default() || l.mint == mint || ctx.accounts.config.pending_packs == 0, ErrorCode::PacksPending);
+    let vault = ctx.accounts.vault.key();
+    let destinations = [ctx.accounts.team.key(), ctx.accounts.giveaway.key(), ctx.accounts.stake.key(), ctx.accounts.absorption.key()];
+    require!(!destinations.contains(&vault), ErrorCode::VaultNotAllowed);
+    let bump = ctx.bumps.lust_config;
+    let l = &mut ctx.accounts.lust_config;
+    l.mint = mint;
+    l.vault = vault;
+    l.destinations = destinations;
+    l.split_bps = split_bps;
+    l.bump = bump;
     Ok(())
 }
 

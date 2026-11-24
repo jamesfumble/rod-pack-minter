@@ -93,6 +93,21 @@ pub struct PendingPack {
     pub redraws: u8,
     /// What is left of the player's retry deposit; returned to the player when the PendingPack closes.
     pub retry_pool: u64,
+    /// CURRENCY_BOOTY or CURRENCY_LUST: which vault holds `price` (raw units of that mint).
+    pub currency: u8,
+}
+
+/// $LUST payments. PDA ["lust"]. A $LUST price is split on opening: `split_bps[i]` to `destinations[i]` (team,
+/// giveaway, stake, absorption pool), the remainder is burned (shop default 10 / 10 / 45 / 25, burn 10).
+#[account]
+#[derive(InitSpace)]
+pub struct LustConfig {
+    pub mint: Pubkey,
+    /// PDA ["vault", mint], authority = config.
+    pub vault: Pubkey,
+    pub destinations: [Pubkey; LUST_SPLITS],
+    pub split_bps: [u16; LUST_SPLITS],
+    pub bump: u8,
 }
 
 /// One card expansion (First Crush = 1). PDA ["expansion", id as u16 LE].
@@ -119,13 +134,15 @@ pub struct Expansion {
     pub weights_regular: [u16; RARITY_COUNT],
     /// Rarity weights for the last slot (the guarantee, e.g. Rare or better).
     pub weights_guaranteed: [u16; RARITY_COUNT],
-    /// Normal price in raw $BOOTY units.
-    pub price: u64,
-    /// One discount period at a time: `discount_price` applies when discount_start <= now < discount_end.
-    pub discount_price: u64,
+    /// List prices in whole tokens, mirrored from the shop catalog. 0 = not sold for that currency.
+    pub price_booty: u64,
+    pub price_lust: u64,
+    /// One discount at a time, in whole percent (1-99), active while discount_start <= now < discount_end. It applies
+    /// to both currencies, rounded like the shop catalog: round(list * (100 - percent) / 100), at least 1.
+    pub discount_percent: u8,
     pub discount_start: i64,
     pub discount_end: i64,
-    /// Sale period for `buy_pack`; 0 = no limit on that side.
+    /// Availability period for `buy_pack` (the catalog's availability window); 0 = open on that side.
     pub sale_start: i64,
     pub sale_end: i64,
     pub packs_sold: u64,
@@ -134,12 +151,23 @@ pub struct Expansion {
 }
 
 impl Expansion {
-    pub fn current_price(&self, now: i64) -> u64 {
-        if self.discount_end > self.discount_start && now >= self.discount_start && now < self.discount_end {
-            self.discount_price
-        } else {
-            self.price
+    /// Price in whole tokens for `currency` at `now`, or None when the pack is not sold for it. Same rule as the shop
+    /// catalog's pricing (shop/pricing.js priceNow): Math.round on halves rounds up; never below 1.
+    pub fn current_price(&self, currency: u8, now: i64) -> Option<u64> {
+        let list = match currency {
+            CURRENCY_BOOTY => self.price_booty,
+            CURRENCY_LUST => self.price_lust,
+            _ => return None,
+        };
+        if list == 0 {
+            return None;
         }
+        let active = self.discount_percent > 0 && now >= self.discount_start && now < self.discount_end;
+        if !active {
+            return Some(list);
+        }
+        let x = list as u128 * (100 - self.discount_percent as u128);
+        Some((((x + 50) / 100) as u64).max(1))
     }
 
     pub fn on_sale(&self, now: i64) -> bool {
@@ -225,6 +253,8 @@ pub struct PackBought {
     pub order_id: [u8; 16],
     pub player: Pubkey,
     pub pending_pack: Pubkey,
+    pub currency: u8,
+    /// Raw units of the payment mint.
     pub price: u64,
     pub purchase_slot: u64,
 }
@@ -244,6 +274,7 @@ pub struct PackMinted {
     /// Leaf index of the first card; card i has leaf index first_leaf_index + i.
     pub first_leaf_index: u64,
     pub card_ids: Vec<u16>,
+    pub currency: u8,
     pub price: u64,
     pub seed: [u8; 32],
 }
@@ -263,6 +294,7 @@ pub struct PackRefunded {
     pub expansion_id: u16,
     pub order_id: [u8; 16],
     pub player: Pubkey,
+    pub currency: u8,
     pub price: u64,
 }
 

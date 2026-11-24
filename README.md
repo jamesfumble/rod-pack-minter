@@ -3,10 +3,11 @@
 Solana program (Anchor 1.2.2) that sells Reign of Desire card packs as Bubblegum v1 cNFTs in the expansion's Token
 Metadata collection. A purchase has two steps:
 
-1. `buy_pack` (player + backend approver): the $BOOTY price moves into the program's vault and a PendingPack records
-   the purchase slot. Tree room is reserved and the draw inputs (weights, card counts) are frozen.
+1. `buy_pack` (player + backend approver): the price, in $BOOTY or $LUST, moves into that currency's vault and a
+   PendingPack records the purchase slot. Tree room is reserved and the draw inputs (weights, card counts) are frozen.
 2. `open_pack` (anyone, normally the backend a moment later): the cards are drawn from the hash of the purchase slot,
-   which only exists once the purchase is irreversible, then minted to the player. The price goes to the shop.
+   which only exists once the purchase is irreversible, then minted to the player. $BOOTY goes to the shop; $LUST is
+   split (team 10%, giveaway 10%, stake 45%, absorption pool 25%) and the rest (10%) burned.
 
 Nobody (player, backend, opener or admin) can choose or re-roll a paid pack's cards. Only `admin_mint` (admin-signed)
 picks a card. The player pays every fee: `buy_pack` takes a deposit (an open fee for whoever opens the pack, plus a retry pool for
@@ -25,11 +26,12 @@ Plan and decisions: `ci-cardgame/docs/plans/2026-11-22-first-crush-expansion.md`
 | `initialize` | program upgrade authority | Config (paused), vault, approver, tree funder, $BOOTY mint and destination, tree size, fees |
 | `migrate_config`, `init_vault` | admin | One-off upgrade of a v1 config (devnet) |
 | `set_paused`, `set_approver`, `set_tree_funder`, `set_tree_size`, `set_fees`, `set_payment`, `set_destination`, `propose_admin` / `accept_admin` | admin | Global settings |
-| `add_expansion`, `update_expansion`, `set_price`, `set_expansion_paused`, `upsert_cards` | admin | Expansions; one discount period at a time; cards are appended or renamed, never removed or re-rarified |
+| `add_expansion`, `update_expansion`, `set_price`, `set_sale_period`, `set_expansion_paused`, `upsert_cards` | admin | Expansions. `set_price` and `set_sale_period` mirror the shop catalog: list prices in whole $BOOTY and $LUST (0 = not sold for that currency), one percentage discount with its period, the availability window. Cards are appended or renamed (only while nothing is pending), never removed or re-rarified |
+| `set_lust_payment` | admin | $LUST mint, vault and the four split destinations with their shares (the rest is burned) |
 | `create_tree` | admin or tree funder | Initialises a pre-allocated tree with the program's PDA as creator and delegate; becomes active or standby |
 | `rotate_tree` | anyone | Promotes the standby tree once the active tree has fewer than 10 free leaves |
-| `buy_pack(expansion_id, order_id, max_price)` | player + approver | Step 1: price to the vault, PendingPack, fee deposit |
-| `open_pack` | anyone | Step 2: seal, draw, mint, price to the shop, deposit to the opener, rent back to the player |
+| `buy_pack(expansion_id, order_id, currency, max_price)` | player + approver | Step 1: price to the currency's vault, PendingPack, fee deposit |
+| `open_pack` | anyone | Step 2: seal, draw, mint, pay out the price (remaining accounts: the payout accounts), open fee to the opener, rent and unused pool back to the player |
 | `seal_pack` | anyone | Stores the purchase slot's hash early (when opening must wait); paid from the deposit |
 | `redraw_pack` | approver or admin | After an outage: gives an unopened, unsealed pack whose slot hash expired a new purchase slot |
 | `refund_pack` | admin | Support tool only: price back to the player for an unopened pack (after `refund_after_secs`) |
@@ -49,7 +51,7 @@ anchor build                     # target\deploy\rod_pack_minter.so + target\idl
 cargo test -p rod-pack-minter -- --nocapture
 ```
 
-The tests (35) run in LiteSVM with the real Metaplex programs. Measured: `buy_pack` ~30-46k CU, `open_pack` of 6 cards
+The tests (39) run in LiteSVM with the real Metaplex programs. Measured: `buy_pack` ~30-46k CU, `open_pack` of 6 cards
 ~400-440k CU, 10 cards ~650-770k CU (also with a full 400-card table), `admin_mint` of 3 cards ~200k CU (callers must set
 a compute limit). With a lookup table: `buy_pack` 444-476 bytes, `rotate_tree` + `open_pack` 361-377 bytes.
 

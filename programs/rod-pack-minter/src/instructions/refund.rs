@@ -5,7 +5,8 @@ use crate::instructions::seal::pay_from_pending;
 use crate::{
     constants::*,
     error::ErrorCode,
-    state::{Config, PackRefunded, PendingPack},
+    instructions::payment::mint_and_vault,
+    state::{Config, LustConfig, PackRefunded, PendingPack},
 };
 
 /// Support tool, not part of normal operation (failed transactions are retried and outages are handled by
@@ -29,13 +30,17 @@ pub struct RefundPack<'info> {
     /// CHECK: must be the pack's player; receives the PendingPack rent.
     #[account(mut, address = pending_pack.player @ ErrorCode::WrongPlayer)]
     pub player: UncheckedAccount<'info>,
-    #[account(mut, address = config.vault @ ErrorCode::WrongVault)]
+    /// The vault of the pack's currency (checked in the handler).
+    #[account(mut)]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    /// A $BOOTY account owned by the player.
-    #[account(mut, token::mint = booty_mint, token::authority = player)]
+    /// A token account of the pack's currency owned by the player.
+    #[account(mut, token::mint = payment_mint, token::authority = player)]
     pub player_token: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = config.booty_mint @ ErrorCode::WrongPaymentAccount)]
-    pub booty_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// Mint of the pack's currency (checked in the handler).
+    pub payment_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// Required for $LUST packs.
+    #[account(seeds = [LUST_SEED], bump = lust_config.bump)]
+    pub lust_config: Option<Box<Account<'info, LustConfig>>>,
     pub token_program: Interface<'info, TokenInterface>,
 }
 
@@ -45,6 +50,9 @@ pub fn handle_refund_pack(ctx: Context<RefundPack>) -> Result<()> {
     let pending = &ctx.accounts.pending_pack;
     let config = &ctx.accounts.config;
     require!(now >= pending.purchased_at.saturating_add(config.refund_after_secs), ErrorCode::TooEarlyToRefund);
+    let (mint, vault) = mint_and_vault(pending.currency, config, ctx.accounts.lust_config.as_deref().map(|b| &**b))?;
+    require_keys_eq!(ctx.accounts.payment_mint.key(), mint, ErrorCode::WrongPaymentAccount);
+    require_keys_eq!(ctx.accounts.vault.key(), vault, ErrorCode::WrongVault);
 
     let price = pending.price;
     if price > 0 {
@@ -55,17 +63,17 @@ pub fn handle_refund_pack(ctx: Context<RefundPack>) -> Result<()> {
                 ctx.accounts.token_program.key(),
                 TransferChecked {
                     from: ctx.accounts.vault.to_account_info(),
-                    mint: ctx.accounts.booty_mint.to_account_info(),
+                    mint: ctx.accounts.payment_mint.to_account_info(),
                     to: ctx.accounts.player_token.to_account_info(),
                     authority: ctx.accounts.config.to_account_info(),
                 },
                 &[seeds],
             ),
             price,
-            ctx.accounts.booty_mint.decimals,
+            ctx.accounts.payment_mint.decimals,
         )?;
     }
-    let (expansion_id, order_id, player, pack_size) = (pending.expansion_id, pending.order_id, pending.player, pending.pack_size);
+    let (expansion_id, order_id, player, pack_size, currency) = (pending.expansion_id, pending.order_id, pending.player, pending.pack_size, pending.currency);
     // The admin sent this transaction instead of an opener: it gets the open fee; the rest returns to the player.
     let fees = pending.open_fee;
     pay_from_pending(&ctx.accounts.pending_pack.to_account_info(), &ctx.accounts.admin.to_account_info(), fees)?;
@@ -73,6 +81,6 @@ pub fn handle_refund_pack(ctx: Context<RefundPack>) -> Result<()> {
     config.pending_packs = config.pending_packs.checked_sub(1).ok_or(ErrorCode::Overflow)?;
     config.reserved_leaves = config.reserved_leaves.saturating_sub(pack_size as u64);
     config.packs_refunded = config.packs_refunded.checked_add(1).ok_or(ErrorCode::Overflow)?;
-    emit_cpi!(PackRefunded { expansion_id, order_id, player, price });
+    emit_cpi!(PackRefunded { expansion_id, order_id, player, currency, price });
     Ok(())
 }

@@ -7,6 +7,13 @@ pub const CARDS_SEED: &[u8] = b"cards";
 pub const MINT_AUTHORITY_SEED: &[u8] = b"mint_authority";
 pub const VAULT_SEED: &[u8] = b"vault";
 pub const PACK_SEED: &[u8] = b"pack";
+pub const LUST_SEED: &[u8] = b"lust";
+
+/// Payment currencies of `buy_pack`.
+pub const CURRENCY_BOOTY: u8 = 0;
+pub const CURRENCY_LUST: u8 = 1;
+/// Number of $LUST split destinations (team, giveaway, stake, absorption pool); the rest of a payment is burned.
+pub const LUST_SPLITS: usize = 4;
 
 // External programs (same addresses on mainnet, devnet and Surfpool)
 pub const BUBBLEGUM_ID: Pubkey = pubkey!("BGUMAp9Gq7iTEuizy4pqaxsTyUCBK68MDfK752saRPUY");

@@ -2,8 +2,8 @@
 // %USERPROFILE%\.config\rod-pack-minter\devnet\ (outside every repo) and are never printed. Public addresses of what
 // this creates are written to deployments/devnet.json.
 //
-//   node scripts/devnet.mjs keys | fund | booty | collection | deploy <program-keypair-path> | upgrade | init | migrate
-//                           expansion | tree [admin|funder] | unpause | buy | buy-only | open <order-hex> | seal <order-hex>
+//   node scripts/devnet.mjs keys | fund | booty | lust | collection | deploy <program-keypair-path> | upgrade | init | migrate
+//                           expansion | tree [admin|funder] | unpause | buy [booty|lust] | buy-only [booty|lust] | open <order-hex> | seal <order-hex>
 //                           refund <order-hex> | admin-mint <cardId> <count> [recipient] | status
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -29,6 +29,10 @@ const STATE = join(ROOT, 'deployments', NETWORK + '.json');
 const CARD_LIST = process.env.CARD_LIST || 'C:/Projects/first-crush-nft-collection/CardListStructureInfo.json';
 const SOLANA = process.env.SOLANA_BIN || join(homedir(), '.local', 'share', 'solana', 'install', 'active_release', 'bin', process.platform === 'win32' ? 'solana.exe' : 'solana');
 const BOOTY = 1_000_000_000n; // 9 decimals
+const LUST = 1_000_000_000n; // 9 decimals
+// First Crush list prices in whole tokens (0 = not sold for that currency), as in the shop catalog.
+const FC_PRICE = { booty: 150n, lust: 1_000n };
+const LUST_SPLIT = [1000, 1000, 4500, 2500]; // team, giveaway, stake, absorption pool; 10% burned
 const TREE = { depth: 14, buffer: 64, canopy: 8 };
 // The player's per-purchase deposit: the open fee plus a retry pool (retry fee x paid retries, the unused part is
 // returned at opening), and the delay before an admin refund.
@@ -53,6 +57,18 @@ const explorer = (sig) => NETWORK === 'devnet' ? `https://explorer.solana.com/tx
 /** The First Crush expansion id (1 at first; a later id on devnet after the card-table format change). */
 const fcId = () => state().expansions?.first_crush?.id ?? 1;
 const isLegacyTable = (data) => data.length !== c.CARD_HEADER_LEN + data.readUInt16LE(11) * c.CARD_ENTRY_LEN;
+const NONE = c.PROGRAM_ID; // an absent optional account
+/** (mint, vault, player token account) of a currency, and the payout accounts open_pack needs. */
+async function currencyAccounts(cur, cfg) {
+    const s = state();
+    if (cur === c.CURRENCY.lust) {
+        const l = await conn.getAccountInfo(c.lustConfigPda());
+        if (!l) throw new Error('$LUST payments are not set up (node scripts/devnet.mjs lust)');
+        const d = l.data; const key = (o) => new PublicKey(d.subarray(o, o + 32));
+        return { mint: key(8), vault: key(40), player: new PublicKey(s.playerLust), lustConfig: c.lustConfigPda(), payout: [key(72), key(104), key(136), key(168)] };
+    }
+    return { mint: cfg.bootyMint, vault: cfg.vault, player: new PublicKey(s.playerBooty), lustConfig: NONE, payout: [cfg.bootyDestination] };
+}
 
 const commands = {
     async keys() {
@@ -88,6 +104,37 @@ const commands = {
         ], k.admin, mint);
         console.log('booty', explorer(sig));
         console.log(save({ bootyMint: mint.publicKey.toBase58(), bootyDestination: shop.toBase58(), playerBooty: player.toBase58() }));
+    },
+
+    // Test $LUST: mint authority = admin, the player gets 100,000, four split destinations (random owners), the vault,
+    // and the split (10 / 10 / 45 / 25, 10% burned).
+    async lust() {
+        const k = K(); let s = state();
+        if (!s.lustMint) {
+            const mint = Keypair.generate();
+            const player = getAssociatedTokenAddressSync(mint.publicKey, k.player.publicKey);
+            const owners = [0, 1, 2, 3].map(() => Keypair.generate().publicKey);
+            const dests = owners.map((o) => getAssociatedTokenAddressSync(mint.publicKey, o));
+            const sig = await send([
+                SystemProgram.createAccount({ fromPubkey: k.admin.publicKey, newAccountPubkey: mint.publicKey, space: MINT_SIZE, lamports: await getMinimumBalanceForRentExemptMint(conn), programId: TOKEN_PROGRAM_ID }),
+                createInitializeMint2Instruction(mint.publicKey, 9, k.admin.publicKey, null),
+                createAssociatedTokenAccountIdempotentInstruction(k.admin.publicKey, player, k.player.publicKey, mint.publicKey),
+                ...dests.map((d, i) => createAssociatedTokenAccountIdempotentInstruction(k.admin.publicKey, d, owners[i], mint.publicKey)),
+                createMintToInstruction(mint.publicKey, player, k.admin.publicKey, 100_000n * LUST),
+            ], k.admin, mint);
+            console.log('test $LUST', explorer(sig));
+            s = save({ lustMint: mint.publicKey.toBase58(), playerLust: player.toBase58(), lustDestinations: dests.map((d) => d.toBase58()) });
+        }
+        const vault = c.vaultPda(s.lustMint);
+        if (!(await conn.getAccountInfo(vault))) {
+            const i = c.ix('init_vault', {}, { admin: k.admin.publicKey, config: c.configPda(), booty_mint: s.lustMint, vault, token_program: TOKEN_PROGRAM_ID, system_program: SystemProgram.programId });
+            console.log('init_vault ($LUST)', explorer(await send([i], k.admin)));
+        }
+        const [team, giveaway, stake, absorption] = s.lustDestinations;
+        const i = c.ix('set_lust_payment', { split_bps: LUST_SPLIT }, { admin: k.admin.publicKey, config: c.configPda(), lust_config: c.lustConfigPda(),
+            lust_mint: s.lustMint, vault, team, giveaway, stake, absorption, system_program: SystemProgram.programId });
+        console.log('set_lust_payment', explorer(await send([i], k.admin)));
+        save({ lustVault: vault.toBase58(), lustConfig: c.lustConfigPda().toBase58() });
     },
 
     // A sized Token Metadata collection NFT owned by the test collection owner, and the collection-authority record for
@@ -208,13 +255,17 @@ const commands = {
         const k = K(); const s = state();
         let id = fcId();
         const existing = await conn.getAccountInfo(c.cardsPda(id));
-        if (existing && isLegacyTable(existing.data)) {
-            // Devnet only: expansion `id` still has the old (Borsh vector) card table. Pause it and start First Crush
-            // again under the next expansion id with a table in the current format, as mainnet will from the start.
+        const existingExp = await conn.getAccountInfo(c.expansionPda(id));
+        if ((existing && isLegacyTable(existing.data)) || (existingExp && existingExp.data.length !== c.EXPANSION_LEN)) {
+            // Devnet only: expansion `id` has an older layout (card table or prices). Pause it and start First Crush again
+            // under the next expansion id in the current format, as mainnet will from the start.
             const e = c.decodeExpansion((await conn.getAccountInfo(c.expansionPda(id))).data);
             if (!e.paused) {
                 const i = c.ix('set_expansion_paused', { expansion_id: id, paused: true }, { admin: k.admin.publicKey, config: c.configPda(), expansion: c.expansionPda(id) });
-                console.log(`pause legacy expansion ${id}`, explorer(await send([i], k.admin)));
+                // An expansion whose layout predates the program cannot even be read by it (so it cannot be sold either);
+                // then there is nothing to pause.
+                try { console.log(`pause legacy expansion ${id}`, explorer(await send([i], k.admin))); }
+                catch { console.log(`legacy expansion ${id} cannot be read by the current program (not for sale); skipped`); }
             }
             id = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data).nextExpansionId;
             console.log('First Crush moves to expansion', id);
@@ -230,7 +281,7 @@ const commands = {
         if (!(await conn.getAccountInfo(c.expansionPda(id)))) {
             const params = { name: 'First Crush', collection_mint: s.collectionMint, creator: ROYALTY_CREATOR, royalty_bps: 690, symbol: '', uri_prefix: prefix,
                 pack_size: 6, weights_regular: [70, 25, 5, 0], weights_guaranteed: [0, 25, 5, 0], sale_start: 0, sale_end: 0 };
-            const i = c.ix('add_expansion', { params, price: 150n * BOOTY }, { admin: k.admin.publicKey, config: c.configPda(), expansion: c.expansionPda(id), card_table: c.cardsPda(id), system_program: SystemProgram.programId });
+            const i = c.ix('add_expansion', { params, price_booty: FC_PRICE.booty, price_lust: FC_PRICE.lust }, { admin: k.admin.publicKey, config: c.configPda(), expansion: c.expansionPda(id), card_table: c.cardsPda(id), system_program: SystemProgram.programId });
             console.log('add_expansion', explorer(await send([i], k.admin)));
         }
         const table = c.decodeCardTable((await conn.getAccountInfo(c.cardsPda(id))).data);
@@ -276,19 +327,23 @@ const commands = {
     },
 
     // Step 1: buy_pack as the test player, co-signed by the approver (wallet signs first, approver second).
-    async 'buy-only'() {
+    async 'buy-only'(currencyName = 'booty') {
         const k = K(); const s = state();
         const cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
         const id = fcId();
+        const cur = c.CURRENCY[currencyName];
+        if (cur === undefined) throw new Error('currency: booty | lust');
+        const pay = await currencyAccounts(cur, cfg);
+        const maxPrice = (cur === c.CURRENCY.lust ? FC_PRICE.lust * LUST : FC_PRICE.booty * BOOTY);
         const orderId = Buffer.alloc(16); Buffer.from('dev-' + Date.now().toString(36)).copy(orderId);
         const ixs = [ComputeBudgetProgram.setComputeUnitLimit({ units: 100_000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000 }),
-            c.ix('buy_pack', { expansion_id: id, order_id: [...orderId], max_price: 150n * BOOTY }, {
+            c.ix('buy_pack', { expansion_id: id, order_id: [...orderId], currency: cur, max_price: maxPrice }, {
                 player: k.player.publicKey, approver: k.approver.publicKey, config: c.configPda(), expansion: c.expansionPda(id), card_table: c.cardsPda(id),
-                pending_pack: c.pendingPda(k.player.publicKey, orderId), player_token: s.playerBooty, vault: cfg.vault, booty_mint: cfg.bootyMint,
-                token_program: TOKEN_PROGRAM_ID, active_tree_config: c.treeConfigPda(cfg.activeTree),
+                pending_pack: c.pendingPda(k.player.publicKey, orderId), player_token: pay.player, vault: pay.vault, payment_mint: pay.mint,
+                lust_config: pay.lustConfig, token_program: TOKEN_PROGRAM_ID, active_tree_config: c.treeConfigPda(cfg.activeTree),
                 standby_tree_config: c.treeConfigPda(cfg.standbyTree.equals(PublicKey.default) ? cfg.activeTree : cfg.standbyTree),
                 system_program: SystemProgram.programId, ...c.eventAccounts() })];
-        const lut = await ensureLookupTable(k.admin, ixs, [k.player.publicKey, k.approver.publicKey, new PublicKey(s.playerBooty), c.pendingPda(k.player.publicKey, orderId)]);
+        const lut = await ensureLookupTable(k.admin, ixs, [k.player.publicKey, k.approver.publicKey, pay.player, c.pendingPda(k.player.publicKey, orderId)]);
         const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
         const tx = new VersionedTransaction(new TransactionMessage({ payerKey: k.player.publicKey, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message([lut]));
         tx.sign([k.player]);
@@ -318,11 +373,14 @@ const commands = {
             ixs.push(c.ix('rotate_tree', {}, { config: c.configPda(), active_tree_config: c.treeConfigPda(tree), ...c.eventAccounts() }));
             tree = cfg.standbyTree;
         }
-        ixs.push(c.ix('open_pack', {}, {
+        const pay = await currencyAccounts(pending.currency, cfg);
+        const openIx = c.ix('open_pack', {}, {
             opener: k.opener.publicKey, config: c.configPda(), pending_pack: pendingKey, player: pending.player,
-            expansion: c.expansionPda(pending.expansionId), card_table: c.cardsPda(pending.expansionId), vault: cfg.vault,
-            booty_destination: cfg.bootyDestination, booty_mint: cfg.bootyMint, token_program: TOKEN_PROGRAM_ID,
-            slot_hashes: SLOT_HASHES, ...c.mintAccounts(tree, exp.collectionMint), ...c.eventAccounts() }));
+            expansion: c.expansionPda(pending.expansionId), card_table: c.cardsPda(pending.expansionId), vault: pay.vault,
+            payment_mint: pay.mint, lust_config: pay.lustConfig, token_program: TOKEN_PROGRAM_ID,
+            slot_hashes: SLOT_HASHES, ...c.mintAccounts(tree, exp.collectionMint), ...c.eventAccounts() });
+        for (const d of pay.payout) openIx.keys.push({ pubkey: new PublicKey(d), isSigner: false, isWritable: true });
+        ixs.push(openIx);
         const lut = await ensureLookupTable(k.admin, ixs, [k.opener.publicKey, pending.player, pendingKey]);
         const before = await conn.getBalance(k.opener.publicKey);
         const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
@@ -347,10 +405,10 @@ const commands = {
     },
 
     // Both steps, the way the backend will run them: buy, wait for the purchase slot to complete, open.
-    async buy() {
+    async buy(currencyName = 'booty') {
         const k = K();
         const before = await conn.getBalance(k.player.publicKey);
-        const order = await commands['buy-only']();
+        const order = await commands['buy-only'](currencyName);
         await new Promise((r) => setTimeout(r, 2000));
         await commands.open(order.toString('hex'));
         console.log('player net lamports for the pack:', (await conn.getBalance(k.player.publicKey)) - before);
@@ -367,8 +425,10 @@ const commands = {
         const k = K(); const s = state();
         const cfg = c.decodeConfig((await conn.getAccountInfo(c.configPda())).data);
         const pendingKey = c.pendingPda(k.player.publicKey, Buffer.from(orderHex, 'hex'));
-        const i = c.ix('refund_pack', {}, { admin: k.admin.publicKey, player: k.player.publicKey, config: c.configPda(), pending_pack: pendingKey, vault: cfg.vault,
-            player_token: s.playerBooty, booty_mint: cfg.bootyMint, token_program: TOKEN_PROGRAM_ID, ...c.eventAccounts() });
+        const pending = c.decodePendingPack((await conn.getAccountInfo(pendingKey)).data);
+        const pay = await currencyAccounts(pending.currency, cfg);
+        const i = c.ix('refund_pack', {}, { admin: k.admin.publicKey, player: k.player.publicKey, config: c.configPda(), pending_pack: pendingKey, vault: pay.vault,
+            player_token: pay.player, payment_mint: pay.mint, lust_config: pay.lustConfig, token_program: TOKEN_PROGRAM_ID, ...c.eventAccounts() });
         console.log('refund_pack (admin)', explorer(await send([i], k.admin)));
     },
 
@@ -431,7 +491,7 @@ async function showPack(sig, exp) {
         if (ev.name !== 'PackMinted') continue;
         const p = c.decodePackMinted(ev.data);
         const R = ['Common', 'Rare', 'Epic', 'Legendary'];
-        console.log(`pack: tree ${p.tree.toBase58()}, leaves ${p.firstLeafIndex}..${p.firstLeafIndex + BigInt(p.cardIds.length) - 1n}, price ${p.price / BOOTY} BOOTY`);
+        console.log(`pack: tree ${p.tree.toBase58()}, leaves ${p.firstLeafIndex}..${p.firstLeafIndex + BigInt(p.cardIds.length) - 1n}, price ${p.price / BOOTY} ${p.currency === 1 ? 'LUST' : 'BOOTY'}`);
         p.cardIds.forEach((id, i) => {
             const card = table.cards[id];
             console.log(`  ${i + 1}. #${id} ${card.name} (${R[card.rarity]})  asset ${c.assetId(p.tree, p.firstLeafIndex + BigInt(i)).toBase58()}`);

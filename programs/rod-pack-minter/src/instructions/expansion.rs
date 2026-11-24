@@ -65,15 +65,17 @@ pub struct AddExpansion<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Creates the next expansion, paused, with an empty card table. Price in raw $BOOTY units.
-pub fn handle_add_expansion(ctx: Context<AddExpansion>, params: ExpansionParams, price: u64) -> Result<()> {
+/// Creates the next expansion, paused, with an empty card table. Prices in whole tokens; 0 = not sold for that
+/// currency (set them with `set_price`).
+pub fn handle_add_expansion(ctx: Context<AddExpansion>, params: ExpansionParams, price_booty: u64, price_lust: u64) -> Result<()> {
     validate(&params)?;
     let id = ctx.accounts.config.next_expansion_id;
     let e = &mut ctx.accounts.expansion;
     e.id = id;
     e.paused = true;
-    e.price = price;
-    e.discount_price = 0;
+    e.price_booty = price_booty;
+    e.price_lust = price_lust;
+    e.discount_percent = 0;
     e.discount_start = 0;
     e.discount_end = 0;
     e.packs_sold = 0;
@@ -119,23 +121,35 @@ pub fn handle_update_expansion(ctx: Context<ExpansionAdmin>, _expansion_id: u16,
     Ok(())
 }
 
-/// Normal price and the single discount period (discount_start = discount_end = 0 means none).
+/// Mirrors the shop catalog: list prices in whole tokens (0 = not sold for that currency) and one discount in whole
+/// percent with its period (all zero = none).
 pub fn handle_set_price(
     ctx: Context<ExpansionAdmin>,
     _expansion_id: u16,
-    price: u64,
-    discount_price: u64,
+    price_booty: u64,
+    price_lust: u64,
+    discount_percent: u8,
     discount_start: i64,
     discount_end: i64,
 ) -> Result<()> {
-    let none = discount_start == 0 && discount_end == 0;
-    require!(none || discount_end > discount_start, ErrorCode::BadDiscount);
-    require!(none || discount_price > 0, ErrorCode::ZeroDiscount);
+    let none = discount_percent == 0 && discount_start == 0 && discount_end == 0;
+    require!(none || ((1..=99).contains(&discount_percent) && discount_end > discount_start), ErrorCode::BadDiscountPercent);
     let e = &mut ctx.accounts.expansion;
-    e.price = price;
-    e.discount_price = if none { 0 } else { discount_price };
+    e.price_booty = price_booty;
+    e.price_lust = price_lust;
+    e.discount_percent = discount_percent;
     e.discount_start = discount_start;
     e.discount_end = discount_end;
+    Ok(())
+}
+
+/// Mirrors the catalog's availability window (unix seconds; 0 = open on that side). New packs can only be bought
+/// inside it; packs already paid can always be opened.
+pub fn handle_set_sale_period(ctx: Context<ExpansionAdmin>, _expansion_id: u16, sale_start: i64, sale_end: i64) -> Result<()> {
+    require!(sale_start == 0 || sale_end == 0 || sale_end > sale_start, ErrorCode::OutsideSalePeriod);
+    let e = &mut ctx.accounts.expansion;
+    e.sale_start = sale_start;
+    e.sale_end = sale_end;
     Ok(())
 }
 

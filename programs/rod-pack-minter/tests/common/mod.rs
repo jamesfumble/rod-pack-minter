@@ -20,6 +20,11 @@ pub const RENT_SYSVAR: Pubkey = anchor_lang::pubkey!("SysvarRent1111111111111111
 pub const INSTRUCTIONS_SYSVAR: Pubkey = anchor_lang::pubkey!("Sysvar1nstructions1111111111111111111111111");
 pub const BOOTY_DECIMALS: u8 = 9;
 pub const BOOTY: u64 = 1_000_000_000;
+pub const LUST: u64 = 1_000_000_000;
+/// Shop default $LUST split: team, giveaway, stake, absorption pool (the remaining 10% is burned).
+pub const LUST_SPLIT: [u16; 4] = [1000, 1000, 4500, 2500];
+pub const FC_PRICE_BOOTY: u64 = 150;
+pub const FC_PRICE_LUST: u64 = 1_000;
 
 pub fn fixture(name: &str) -> Vec<u8> {
     let path = format!("{}/../../tests/fixtures/{}.so", env!("CARGO_MANIFEST_DIR"), name);
@@ -136,6 +141,10 @@ pub fn pending_pda(player: &Pubkey, order_id: &[u8; 16]) -> Pubkey {
     pda(&[PACK_SEED, player.as_ref(), order_id], &rod_pack_minter::ID)
 }
 
+pub fn lust_config_pda() -> Pubkey {
+    pda(&[LUST_SEED], &rod_pack_minter::ID)
+}
+
 pub fn vault_pda(mint: &Pubkey) -> Pubkey {
     pda(&[VAULT_SEED, mint.as_ref()], &rod_pack_minter::ID)
 }
@@ -185,6 +194,9 @@ pub struct Env {
     pub booty_mint: Pubkey,
     pub player_token: Pubkey,
     pub shop_token: Pubkey,
+    pub lust_mint: Pubkey,
+    pub player_lust: Pubkey,
+    pub lust_dests: [Pubkey; 4],
     pub collection_owner: Keypair,
     pub collection_mint: Pubkey,
     pub creator: Pubkey,
@@ -242,9 +254,22 @@ impl Env {
         let shop_token = Pubkey::new_unique();
         set_owned(&mut svm, shop_token, TOKEN_PROGRAM, token_account_data(&booty_mint, &Pubkey::new_unique(), 0));
 
+        // $LUST (9 decimals): player holds 100,000; four split destinations start at 0.
+        let lust_mint = Pubkey::new_unique();
+        set_owned(&mut svm, lust_mint, TOKEN_PROGRAM, mint_data(None, 1_000_000_000 * LUST, 9));
+        let player_lust = Pubkey::new_unique();
+        set_owned(&mut svm, player_lust, TOKEN_PROGRAM, token_account_data(&lust_mint, &player.pubkey(), 100_000 * LUST));
+        let lust_dests = [Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique()];
+        for d in lust_dests {
+            set_owned(&mut svm, d, TOKEN_PROGRAM, token_account_data(&lust_mint, &Pubkey::new_unique(), 0));
+        }
+
         let opener = Keypair::new();
         svm.airdrop(&opener.pubkey(), 1_000_000_000).unwrap();
         let mut env = Env {
+            lust_mint,
+            player_lust,
+            lust_dests,
             svm,
             opener,
             next_order: 1,
@@ -371,10 +396,69 @@ impl Env {
         )
     }
 
+    /// initialize, then $LUST payments (vault + split), as the set-up runbook does.
     pub fn initialize(&mut self, depth: u32, buffer: u32, canopy: u32) -> Result<TransactionMetadata, String> {
         let ix = self.initialize_ix(&self.admin.pubkey(), depth, buffer, canopy);
         let admin = self.admin.insecure_clone();
-        send(&mut self.svm, &[ix], &admin, &[])
+        let meta = send(&mut self.svm, &[ix], &admin, &[])?;
+        let init_vault = Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::InitVault {}.data(),
+            rod_pack_minter::accounts::InitVault {
+                admin: admin.pubkey(),
+                config: config_pda(),
+                booty_mint: self.lust_mint,
+                vault: vault_pda(&self.lust_mint),
+                token_program: TOKEN_PROGRAM,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+        );
+        let set_lust = self.set_lust_ix(LUST_SPLIT);
+        send(&mut self.svm, &[init_vault, set_lust], &admin, &[])?;
+        Ok(meta)
+    }
+
+    pub fn set_lust_ix(&self, split_bps: [u16; 4]) -> Instruction {
+        Instruction::new_with_bytes(
+            rod_pack_minter::ID,
+            &rod_pack_minter::instruction::SetLustPayment { split_bps }.data(),
+            rod_pack_minter::accounts::SetLustPayment {
+                admin: self.admin.pubkey(),
+                config: config_pda(),
+                lust_config: lust_config_pda(),
+                lust_mint: self.lust_mint,
+                vault: vault_pda(&self.lust_mint),
+                team: self.lust_dests[0],
+                giveaway: self.lust_dests[1],
+                stake: self.lust_dests[2],
+                absorption: self.lust_dests[3],
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    /// (mint, vault, player's token account) of a currency.
+    pub fn currency_accounts(&self, currency: u8) -> (Pubkey, Pubkey, Pubkey) {
+        if currency == CURRENCY_LUST {
+            (self.lust_mint, vault_pda(&self.lust_mint), self.player_lust)
+        } else {
+            (self.booty_mint, vault_pda(&self.booty_mint), self.player_token)
+        }
+    }
+
+    /// Payout accounts of a currency (open_pack's remaining accounts).
+    pub fn payout_metas(&self, currency: u8) -> Vec<AccountMeta> {
+        if currency == CURRENCY_LUST {
+            self.lust_dests.iter().map(|d| AccountMeta::new(*d, false)).collect()
+        } else {
+            vec![AccountMeta::new(self.shop_token, false)]
+        }
+    }
+
+    fn pack_currency(&self, order_id: &[u8; 16]) -> u8 {
+        self.pending(order_id).map(|p| p.currency).unwrap_or(CURRENCY_BOOTY)
     }
 
     pub fn admin_ix(&self, data: Vec<u8>) -> Instruction {
@@ -416,7 +500,7 @@ impl Env {
         let id = 1u16;
         let ix = Instruction::new_with_bytes(
             rod_pack_minter::ID,
-            &rod_pack_minter::instruction::AddExpansion { params: self.first_crush_params(), price: 150 * BOOTY }.data(),
+            &rod_pack_minter::instruction::AddExpansion { params: self.first_crush_params(), price_booty: FC_PRICE_BOOTY, price_lust: FC_PRICE_LUST }.data(),
             rod_pack_minter::accounts::AddExpansion {
                 admin: self.admin.pubkey(),
                 config: config_pda(),
@@ -538,12 +622,17 @@ impl Env {
     }
 
     pub fn buy_ix(&self, id: u16, order_id: [u8; 16], max_price: u64, approver: &Pubkey) -> Instruction {
+        self.buy_ix_in(CURRENCY_BOOTY, id, order_id, max_price, approver)
+    }
+
+    pub fn buy_ix_in(&self, currency: u8, id: u16, order_id: [u8; 16], max_price: u64, approver: &Pubkey) -> Instruction {
+        let (mint, vault, player_token) = self.currency_accounts(currency);
         let c = self.config();
         let active_tc = bubblegum::tree_config_address(&c.active_tree);
         let standby_tc = if c.standby_tree == Pubkey::default() { active_tc } else { bubblegum::tree_config_address(&c.standby_tree) };
         Instruction::new_with_bytes(
             rod_pack_minter::ID,
-            &rod_pack_minter::instruction::BuyPack { expansion_id: id, order_id, max_price }.data(),
+            &rod_pack_minter::instruction::BuyPack { expansion_id: id, order_id, currency, max_price }.data(),
             rod_pack_minter::accounts::BuyPack {
                 player: self.player.pubkey(),
                 approver: *approver,
@@ -551,9 +640,10 @@ impl Env {
                 expansion: expansion_pda(id),
                 card_table: cards_pda(id),
                 pending_pack: pending_pda(&self.player.pubkey(), &order_id),
-                player_token: self.player_token,
-                vault: vault_pda(&self.booty_mint),
-                booty_mint: self.booty_mint,
+                player_token,
+                vault,
+                payment_mint: mint,
+                lust_config: if currency == CURRENCY_LUST { Some(lust_config_pda()) } else { None },
                 token_program: TOKEN_PROGRAM,
                 active_tree_config: active_tc,
                 standby_tree_config: standby_tc,
@@ -573,9 +663,19 @@ impl Env {
         send(&mut self.svm, &[ix], &player, &[&approver]).map(|_| order)
     }
 
+    /// buy_pack paid in $LUST.
+    pub fn buy_lust(&mut self, id: u16, max_price: u64) -> Result<[u8; 16], String> {
+        let order = self.new_order();
+        let ix = self.buy_ix_in(CURRENCY_LUST, id, order, max_price, &self.approver.pubkey());
+        let (player, approver) = (self.player.insecure_clone(), self.approver.insecure_clone());
+        send(&mut self.svm, &[ix], &player, &[&approver]).map(|_| order)
+    }
+
     pub fn open_ix(&self, opener: &Pubkey, order_id: &[u8; 16], player: &Pubkey, expansion_id: u16) -> Instruction {
         let tree = self.config().active_tree;
-        Instruction::new_with_bytes(
+        let currency = self.pack_currency(order_id);
+        let (mint, vault, _) = self.currency_accounts(currency);
+        let mut ix = Instruction::new_with_bytes(
             rod_pack_minter::ID,
             &rod_pack_minter::instruction::OpenPack {}.data(),
             rod_pack_minter::accounts::OpenPack {
@@ -585,9 +685,9 @@ impl Env {
                 player: *player,
                 expansion: expansion_pda(expansion_id),
                 card_table: cards_pda(expansion_id),
-                vault: vault_pda(&self.booty_mint),
-                booty_destination: self.shop_token,
-                booty_mint: self.booty_mint,
+                vault,
+                payment_mint: mint,
+                lust_config: if currency == CURRENCY_LUST { Some(lust_config_pda()) } else { None },
                 token_program: TOKEN_PROGRAM,
                 mint: self.mint_accounts(&tree),
                 slot_hashes: SLOT_HASHES_ID,
@@ -595,7 +695,9 @@ impl Env {
                 program: rod_pack_minter::ID,
             }
             .to_account_metas(None),
-        )
+        );
+        ix.accounts.extend(self.payout_metas(currency));
+        ix
     }
 
     /// open_pack sent by the backend's opener key, with a compute limit.
@@ -655,6 +757,8 @@ impl Env {
 
     /// The admin's refund of a pack of the test player.
     pub fn refund_ix(&self, signer: &Pubkey, order_id: &[u8; 16]) -> Instruction {
+        let currency = self.pack_currency(order_id);
+        let (mint, vault, player_token) = self.currency_accounts(currency);
         Instruction::new_with_bytes(
             rod_pack_minter::ID,
             &rod_pack_minter::instruction::RefundPack {}.data(),
@@ -663,9 +767,10 @@ impl Env {
                 config: config_pda(),
                 pending_pack: pending_pda(&self.player.pubkey(), order_id),
                 player: self.player.pubkey(),
-                vault: vault_pda(&self.booty_mint),
-                player_token: self.player_token,
-                booty_mint: self.booty_mint,
+                vault,
+                player_token,
+                payment_mint: mint,
+                lust_config: if currency == CURRENCY_LUST { Some(lust_config_pda()) } else { None },
                 token_program: TOKEN_PROGRAM,
                 event_authority: event_authority_pda(),
                 program: rod_pack_minter::ID,

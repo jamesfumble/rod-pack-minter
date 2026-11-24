@@ -7,7 +7,8 @@ use crate::{
     constants::*,
     draw::effective_weights,
     error::ErrorCode,
-    state::{rarity_counts, CardTable, Config, Expansion, PackBought, PendingPack},
+    instructions::payment::{mint_and_vault, to_raw},
+    state::{rarity_counts, CardTable, Config, Expansion, LustConfig, PackBought, PendingPack},
 };
 
 /// Step 1 of a purchase: the price moves into the program's vault and a PendingPack records the purchase slot.
@@ -35,13 +36,17 @@ pub struct BuyPack<'info> {
         seeds = [PACK_SEED, player.key().as_ref(), order_id.as_ref()], bump
     )]
     pub pending_pack: Box<Account<'info, PendingPack>>,
-    /// The player's $BOOTY account (transfer_checked enforces owner and mint).
+    /// The player's token account of the payment currency (transfer_checked enforces owner and mint).
     #[account(mut)]
     pub player_token: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(mut, address = config.vault @ ErrorCode::WrongVault)]
+    /// The vault of the payment currency (checked in the handler).
+    #[account(mut)]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = config.booty_mint @ ErrorCode::WrongPaymentAccount)]
-    pub booty_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// $BOOTY or $LUST mint (checked in the handler).
+    pub payment_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// Required for $LUST payments.
+    #[account(seeds = [LUST_SEED], bump = lust_config.bump)]
+    pub lust_config: Option<Box<Account<'info, LustConfig>>>,
     pub token_program: Interface<'info, TokenInterface>,
     /// CHECK: Bubblegum tree config of the active tree (checked in the handler).
     pub active_tree_config: UncheckedAccount<'info>,
@@ -65,13 +70,16 @@ fn free_leaves(ctx: &Context<BuyPack>) -> Result<u64> {
     Ok(free)
 }
 
-pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 16], max_price: u64) -> Result<()> {
+/// `currency`: CURRENCY_BOOTY or CURRENCY_LUST. `max_price`: the most the player accepts, in raw units of that mint.
+pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 16], currency: u8, max_price: u64) -> Result<()> {
     let config = &ctx.accounts.config;
     let expansion = &ctx.accounts.expansion;
     require!(!config.paused, ErrorCode::ProgramPaused);
     require!(!expansion.paused, ErrorCode::ExpansionPaused);
     require_keys_eq!(ctx.accounts.approver.key(), config.approver, ErrorCode::WrongApprover);
-    require!(config.vault != Pubkey::default(), ErrorCode::WrongVault);
+    let (mint, vault) = mint_and_vault(currency, config, ctx.accounts.lust_config.as_deref().map(|b| &**b))?;
+    require_keys_eq!(ctx.accounts.payment_mint.key(), mint, ErrorCode::WrongPaymentAccount);
+    require_keys_eq!(ctx.accounts.vault.key(), vault, ErrorCode::WrongVault);
     let clock = Clock::get()?;
     require!(expansion.on_sale(clock.unix_timestamp), ErrorCode::OutsideSalePeriod);
     require!(ctx.accounts.card_table.count > 0, ErrorCode::NoCards);
@@ -89,24 +97,24 @@ pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 
     require!(effective_weights(&expansion.weights_regular, &counts).iter().sum::<u64>() > 0, ErrorCode::BadWeights);
     let (weights_regular, weights_guaranteed) = (expansion.weights_regular, expansion.weights_guaranteed);
 
-    let price = expansion.current_price(clock.unix_timestamp);
+    let whole = expansion.current_price(currency, clock.unix_timestamp).ok_or(ErrorCode::NotForSale)?;
+    let decimals = ctx.accounts.payment_mint.decimals;
+    let price = to_raw(whole, decimals)?;
     require!(price <= max_price, ErrorCode::PriceAboveMax);
 
-    if price > 0 {
-        transfer_checked(
-            CpiContext::new(
-                ctx.accounts.token_program.key(),
-                TransferChecked {
-                    from: ctx.accounts.player_token.to_account_info(),
-                    mint: ctx.accounts.booty_mint.to_account_info(),
-                    to: ctx.accounts.vault.to_account_info(),
-                    authority: ctx.accounts.player.to_account_info(),
-                },
-            ),
-            price,
-            ctx.accounts.booty_mint.decimals,
-        )?;
-    }
+    transfer_checked(
+        CpiContext::new(
+            ctx.accounts.token_program.key(),
+            TransferChecked {
+                from: ctx.accounts.player_token.to_account_info(),
+                mint: ctx.accounts.payment_mint.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+                authority: ctx.accounts.player.to_account_info(),
+            },
+        ),
+        price,
+        decimals,
+    )?;
 
     // The opener's fee plus a retry pool for seals/redraws, paid by the player now and handed out by the program
     // later. The unused part of the pool comes back to the player when the pack is opened.
@@ -141,6 +149,7 @@ pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 
     p.weights_guaranteed = weights_guaranteed;
     p.rarity_counts = counts;
     p.redraws = 0;
+    p.currency = currency;
 
     let config = &mut ctx.accounts.config;
     config.pending_packs = config.pending_packs.checked_add(1).ok_or(ErrorCode::Overflow)?;
@@ -151,6 +160,7 @@ pub fn handle_buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 
         order_id,
         player: ctx.accounts.player.key(),
         pending_pack: ctx.accounts.pending_pack.key(),
+        currency,
         price,
         purchase_slot: clock.slot,
     });

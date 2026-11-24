@@ -151,7 +151,11 @@
           }
         },
         {
-          "name": "price",
+          "name": "price_booty",
+          "type": "u64"
+        },
+        {
+          "name": "price_lust",
           "type": "u64"
         }
       ]
@@ -442,16 +446,42 @@
         {
           "name": "player_token",
           "docs": [
-            "The player's $BOOTY account (transfer_checked enforces owner and mint)."
+            "The player's token account of the payment currency (transfer_checked enforces owner and mint)."
           ],
           "writable": true
         },
         {
           "name": "vault",
+          "docs": [
+            "The vault of the payment currency (checked in the handler)."
+          ],
           "writable": true
         },
         {
-          "name": "booty_mint"
+          "name": "payment_mint",
+          "docs": [
+            "$BOOTY or $LUST mint (checked in the handler)."
+          ]
+        },
+        {
+          "name": "lust_config",
+          "docs": [
+            "Required for $LUST payments."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  117,
+                  115,
+                  116
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "token_program"
@@ -486,6 +516,10 @@
               16
             ]
           }
+        },
+        {
+          "name": "currency",
+          "type": "u8"
         },
         {
           "name": "max_price",
@@ -969,14 +1003,37 @@
         },
         {
           "name": "vault",
+          "docs": [
+            "The vault of the pack's currency (checked in the handler)."
+          ],
           "writable": true
         },
         {
-          "name": "booty_destination",
+          "name": "payment_mint",
+          "docs": [
+            "Mint of the pack's currency (checked in the handler); writable for the $LUST burn."
+          ],
           "writable": true
         },
         {
-          "name": "booty_mint"
+          "name": "lust_config",
+          "docs": [
+            "Required for $LUST packs."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  117,
+                  115,
+                  116
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "token_program"
@@ -1244,17 +1301,43 @@
         },
         {
           "name": "vault",
+          "docs": [
+            "The vault of the pack's currency (checked in the handler)."
+          ],
           "writable": true
         },
         {
           "name": "player_token",
           "docs": [
-            "A $BOOTY account owned by the player."
+            "A token account of the pack's currency owned by the player."
           ],
           "writable": true
         },
         {
-          "name": "booty_mint"
+          "name": "payment_mint",
+          "docs": [
+            "Mint of the pack's currency (checked in the handler)."
+          ]
+        },
+        {
+          "name": "lust_config",
+          "docs": [
+            "Required for $LUST packs."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  117,
+                  115,
+                  116
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "token_program"
@@ -1597,6 +1680,115 @@
       ]
     },
     {
+      "name": "set_lust_payment",
+      "discriminator": [
+        24,
+        96,
+        206,
+        130,
+        93,
+        4,
+        240,
+        255
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lust_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  117,
+                  115,
+                  116
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lust_mint"
+        },
+        {
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "lust_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "team"
+        },
+        {
+          "name": "giveaway"
+        },
+        {
+          "name": "stake"
+        },
+        {
+          "name": "absorption"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "split_bps",
+          "type": {
+            "array": [
+              "u16",
+              4
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "set_paused",
       "discriminator": [
         91,
@@ -1783,12 +1975,16 @@
           "type": "u16"
         },
         {
-          "name": "price",
+          "name": "price_booty",
           "type": "u64"
         },
         {
-          "name": "discount_price",
+          "name": "price_lust",
           "type": "u64"
+        },
+        {
+          "name": "discount_percent",
+          "type": "u8"
         },
         {
           "name": "discount_start",
@@ -1796,6 +1992,86 @@
         },
         {
           "name": "discount_end",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "set_sale_period",
+      "discriminator": [
+        39,
+        133,
+        251,
+        95,
+        28,
+        19,
+        8,
+        189
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "expansion",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  120,
+                  112,
+                  97,
+                  110,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "expansion_id"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "expansion_id",
+          "type": "u16"
+        },
+        {
+          "name": "sale_start",
+          "type": "i64"
+        },
+        {
+          "name": "sale_end",
           "type": "i64"
         }
       ]
@@ -2133,6 +2409,19 @@
         31,
         255,
         20
+      ]
+    },
+    {
+      "name": "LustConfig",
+      "discriminator": [
+        3,
+        114,
+        57,
+        173,
+        20,
+        65,
+        70,
+        214
       ]
     },
     {
@@ -2490,6 +2779,31 @@
       "code": 6046,
       "name": "NotRedrawer",
       "msg": "Only the backend approver or the admin may redraw a pack"
+    },
+    {
+      "code": 6047,
+      "name": "NotForSale",
+      "msg": "This pack is not sold for this currency"
+    },
+    {
+      "code": 6048,
+      "name": "BadCurrency",
+      "msg": "Unknown currency, or $LUST payments are not set up"
+    },
+    {
+      "code": 6049,
+      "name": "BadSplit",
+      "msg": "The $LUST split must not exceed 100%"
+    },
+    {
+      "code": 6050,
+      "name": "WrongDestination",
+      "msg": "Wrong payout account"
+    },
+    {
+      "code": 6051,
+      "name": "BadDiscountPercent",
+      "msg": "A discount is 1-99 percent with a valid period"
     }
   ],
   "types": [
@@ -2824,18 +3138,23 @@
             }
           },
           {
-            "name": "price",
+            "name": "price_booty",
             "docs": [
-              "Normal price in raw $BOOTY units."
+              "List prices in whole tokens, mirrored from the shop catalog. 0 = not sold for that currency."
             ],
             "type": "u64"
           },
           {
-            "name": "discount_price",
-            "docs": [
-              "One discount period at a time: `discount_price` applies when discount_start <= now < discount_end."
-            ],
+            "name": "price_lust",
             "type": "u64"
+          },
+          {
+            "name": "discount_percent",
+            "docs": [
+              "One discount at a time, in whole percent (1-99), active while discount_start <= now < discount_end. It applies",
+              "to both currencies, rounded like the shop catalog: round(list * (100 - percent) / 100), at least 1."
+            ],
+            "type": "u8"
           },
           {
             "name": "discount_start",
@@ -2848,7 +3167,7 @@
           {
             "name": "sale_start",
             "docs": [
-              "Sale period for `buy_pack`; 0 = no limit on that side."
+              "Availability period for `buy_pack` (the catalog's availability window); 0 = open on that side."
             ],
             "type": "i64"
           },
@@ -2978,6 +3297,51 @@
       }
     },
     {
+      "name": "LustConfig",
+      "docs": [
+        "$LUST payments. PDA [\"lust\"]. A $LUST price is split on opening: `split_bps[i]` to `destinations[i]` (team,",
+        "giveaway, stake, absorption pool), the remainder is burned (shop default 10 / 10 / 45 / 25, burn 10)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "docs": [
+              "PDA [\"vault\", mint], authority = config."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "destinations",
+            "type": {
+              "array": [
+                "pubkey",
+                4
+              ]
+            }
+          },
+          {
+            "name": "split_bps",
+            "type": {
+              "array": [
+                "u16",
+                4
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "PackBought",
       "type": {
         "kind": "struct",
@@ -3004,7 +3368,14 @@
             "type": "pubkey"
           },
           {
+            "name": "currency",
+            "type": "u8"
+          },
+          {
             "name": "price",
+            "docs": [
+              "Raw units of the payment mint."
+            ],
             "type": "u64"
           },
           {
@@ -3052,6 +3423,10 @@
             "type": {
               "vec": "u16"
             }
+          },
+          {
+            "name": "currency",
+            "type": "u8"
           },
           {
             "name": "price",
@@ -3121,6 +3496,10 @@
           {
             "name": "player",
             "type": "pubkey"
+          },
+          {
+            "name": "currency",
+            "type": "u8"
           },
           {
             "name": "price",
@@ -3278,6 +3657,13 @@
               "What is left of the player's retry deposit; returned to the player when the PendingPack closes."
             ],
             "type": "u64"
+          },
+          {
+            "name": "currency",
+            "docs": [
+              "CURRENCY_BOOTY or CURRENCY_LUST: which vault holds `price` (raw units of that mint)."
+            ],
+            "type": "u8"
           }
         ]
       }

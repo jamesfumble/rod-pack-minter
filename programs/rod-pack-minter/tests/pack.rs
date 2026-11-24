@@ -383,7 +383,7 @@ fn a_full_size_card_table_fits_in_the_default_heap() {
     let id = 2u16;
     let ix = Instruction::new_with_bytes(
         rod_pack_minter::ID,
-        &rod_pack_minter::instruction::AddExpansion { params: p, price: BOOTY }.data(),
+        &rod_pack_minter::instruction::AddExpansion { params: p, price_booty: 1, price_lust: 0 }.data(),
         rod_pack_minter::accounts::AddExpansion {
             admin: env.admin.pubkey(),
             config: config_pda(),
@@ -493,21 +493,108 @@ fn price_limit_and_discount() {
     let (mut env, id, _) = Env::ready();
     assert_err(env.buy(id, 149 * BOOTY), "PriceAboveMax");
     let now = env.svm.get_sysvar::<Clock>().unix_timestamp;
-    let set = |env: &Env, discount_price: u64, start: i64, end: i64| {
+    let set = |env: &Env, percent: u8, start: i64, end: i64| {
         env.expansion_admin_ix(
             id,
-            rod_pack_minter::instruction::SetPrice { expansion_id: id, price: 150 * BOOTY, discount_price, discount_start: start, discount_end: end }.data(),
+            rod_pack_minter::instruction::SetPrice {
+                expansion_id: id,
+                price_booty: 150,
+                price_lust: 1_000,
+                discount_percent: percent,
+                discount_start: start,
+                discount_end: end,
+            }
+            .data(),
         )
     };
-    let ix = set(&env, 0, now - 10, now + 3600);
-    assert_err(env.run_admin(ix), "ZeroDiscount");
-    let ix = set(&env, 100 * BOOTY, now - 10, now + 3600);
-    env.run_admin(ix).unwrap();
-    let order = env.buy(id, 100 * BOOTY).expect("discounted buy");
-    assert_eq!(env.pending(&order).unwrap().price, 100 * BOOTY);
-    let ix = set(&env, 100 * BOOTY, now - 7200, now - 3600);
+    for bad in [set(&env, 0, now - 10, now + 3600), set(&env, 100, now - 10, now + 3600), set(&env, 10, now, now)] {
+        assert_err(env.run_admin(bad), "BadDiscountPercent");
+    }
+    // 33% off, rounded like the catalog: round(150 * 0.67) = round(100.5) = 101 $BOOTY; round(1000 * 0.67) = 670 $LUST.
+    let ix = set(&env, 33, now - 10, now + 3600);
     env.run_admin(ix).unwrap();
     assert_err(env.buy(id, 100 * BOOTY), "PriceAboveMax");
+    let order = env.buy(id, 101 * BOOTY).expect("discounted buy");
+    assert_eq!(env.pending(&order).unwrap().price, 101 * BOOTY);
+    let order = env.buy_lust(id, 670 * LUST).expect("discounted $LUST buy");
+    assert_eq!(env.pending(&order).unwrap().price, 670 * LUST);
+    // A discount period in the past no longer applies.
+    let ix = set(&env, 33, now - 7200, now - 3600);
+    env.run_admin(ix).unwrap();
+    assert_err(env.buy(id, 101 * BOOTY), "PriceAboveMax");
+}
+
+#[test]
+fn a_lust_pack_is_split_and_the_rest_burned() {
+    let (mut env, id, tree) = Env::ready();
+    let lust_before = token_amount(&env.svm, &env.player_lust);
+    let supply_before = u64::from_le_bytes(env.svm.get_account(&env.lust_mint).unwrap().data[36..44].try_into().unwrap());
+    let order = env.buy_lust(id, FC_PRICE_LUST * LUST).expect("buy with $LUST");
+    let price = FC_PRICE_LUST * LUST;
+    assert_eq!(token_amount(&env.svm, &env.player_lust), lust_before - price);
+    assert_eq!(token_amount(&env.svm, &vault_pda(&env.lust_mint)), price, "held in the $LUST vault");
+    assert_eq!(token_amount(&env.svm, &env.shop_token), 0, "$BOOTY shop untouched");
+    let meta = env.next_slot_and_open(&order, id).expect("open a $LUST pack");
+    let ev = pack_event(&meta);
+    assert_eq!((ev.currency, ev.price), (CURRENCY_LUST, price));
+    assert_eq!(env.num_minted(&tree), 6);
+    // 10% team, 10% giveaway, 45% stake, 25% absorption pool, 10% burned.
+    let got: Vec<u64> = env.lust_dests.iter().map(|d| token_amount(&env.svm, d)).collect();
+    assert_eq!(got, vec![price / 10, price / 10, price * 45 / 100, price / 4]);
+    let supply_after = u64::from_le_bytes(env.svm.get_account(&env.lust_mint).unwrap().data[36..44].try_into().unwrap());
+    assert_eq!(supply_before - supply_after, price / 10, "the rest is burned");
+    assert_eq!(token_amount(&env.svm, &vault_pda(&env.lust_mint)), 0);
+}
+
+#[test]
+fn a_price_of_zero_means_not_for_sale_in_that_currency() {
+    let (mut env, id, _) = Env::ready();
+    // $LUST only: no $BOOTY price.
+    let ix = env.expansion_admin_ix(
+        id,
+        rod_pack_minter::instruction::SetPrice { expansion_id: id, price_booty: 0, price_lust: 500, discount_percent: 0, discount_start: 0, discount_end: 0 }.data(),
+    );
+    env.run_admin(ix).unwrap();
+    assert_err(env.buy(id, u64::MAX), "NotForSale");
+    env.buy_lust(id, 500 * LUST).expect("$LUST still sold");
+    // $BOOTY only.
+    let ix = env.expansion_admin_ix(
+        id,
+        rod_pack_minter::instruction::SetPrice { expansion_id: id, price_booty: 150, price_lust: 0, discount_percent: 0, discount_start: 0, discount_end: 0 }.data(),
+    );
+    env.run_admin(ix).unwrap();
+    assert_err(env.buy_lust(id, u64::MAX), "NotForSale");
+    env.buy(id, 150 * BOOTY).expect("$BOOTY still sold");
+}
+
+#[test]
+fn the_lust_payout_accounts_must_be_the_configured_ones() {
+    let (mut env, id, _) = Env::ready();
+    let order = env.buy_lust(id, FC_PRICE_LUST * LUST).unwrap();
+    let s = current_slot(&env.svm);
+    warp(&mut env.svm, s + 1);
+    let mut ix = env.open_ix(&env.opener.pubkey(), &order, &env.player.pubkey(), id);
+    let thief = Pubkey::new_unique();
+    set_owned(&mut env.svm, thief, TOKEN_PROGRAM, token_account_data(&env.lust_mint, &Pubkey::new_unique(), 0));
+    let n = ix.accounts.len();
+    ix.accounts[n - 2].pubkey = thief; // the stake share
+    let opener = env.opener.insecure_clone();
+    assert_err(send(&mut env.svm, &[compute_limit_ix(1_400_000), ix], &opener, &[]), "WrongDestination");
+    // A split above 100% is refused.
+    let ix = env.set_lust_ix([5000, 5000, 1, 0]);
+    assert_err(env.run_admin(ix), "BadSplit");
+}
+
+#[test]
+fn the_sale_period_has_its_own_instruction() {
+    let (mut env, id, _) = Env::ready();
+    let now = env.svm.get_sysvar::<Clock>().unix_timestamp;
+    let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::SetSalePeriod { expansion_id: id, sale_start: now - 100, sale_end: now - 10 }.data());
+    env.run_admin(ix).unwrap();
+    assert_err(env.buy(id, 150 * BOOTY), "OutsideSalePeriod");
+    let ix = env.expansion_admin_ix(id, rod_pack_minter::instruction::SetSalePeriod { expansion_id: id, sale_start: now - 100, sale_end: 0 }.data());
+    env.run_admin(ix).unwrap();
+    env.buy(id, 150 * BOOTY).expect("open-ended period");
 }
 
 #[test]

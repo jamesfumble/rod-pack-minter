@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::{transfer_checked, Mint, TokenAccount, TokenInterface, TransferChecked};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 use crate::instructions::mint::*;
 use crate::instructions::seal::{pay_from_pending, seal};
@@ -7,14 +7,16 @@ use crate::{
     constants::*,
     draw::{draw_pack, pack_seed},
     error::ErrorCode,
-    state::{nth_of_rarity, CardTable, Config, Expansion, PackMinted, PackSealed, PendingPack},
+    instructions::payment::{mint_and_vault, pay_out},
+    state::{nth_of_rarity, CardTable, Config, Expansion, LustConfig, PackMinted, PackSealed, PendingPack},
 };
 
 /// Step 2 of a purchase. Anyone may send it (normally the backend, right after the purchase; the game client as a
 /// fallback); the result does not depend on who sends it or when. It seals the pack if needed, draws the cards from
-/// the purchase slot's hash, mints them to the player, moves the price from the vault to the shop, pays the opener the
-/// player's fee deposit and closes the PendingPack (its rent goes back to the player). Works while paused, because the
-/// pack is already paid.
+/// the purchase slot's hash, mints them to the player, pays the price out of the vault ($BOOTY: to the shop; $LUST: the
+/// split, the rest burned), pays the opener the open fee and closes the PendingPack (its rent and the unused retry
+/// pool go back to the player). Works while paused, because the pack is already paid. Remaining accounts: the payout
+/// accounts ($BOOTY: the shop account; $LUST: the four split destinations), writable, in config order.
 #[event_cpi]
 #[derive(Accounts)]
 pub struct OpenPack<'info> {
@@ -37,19 +39,22 @@ pub struct OpenPack<'info> {
     pub expansion: Box<Account<'info, Expansion>>,
     #[account(seeds = [CARDS_SEED, pending_pack.expansion_id.to_le_bytes().as_ref()], bump = card_table.bump)]
     pub card_table: Box<Account<'info, CardTable>>,
-    #[account(mut, address = config.vault @ ErrorCode::WrongVault)]
+    /// The vault of the pack's currency (checked in the handler).
+    #[account(mut)]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(mut, address = config.booty_destination @ ErrorCode::WrongPaymentAccount)]
-    pub booty_destination: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = config.booty_mint @ ErrorCode::WrongPaymentAccount)]
-    pub booty_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// Mint of the pack's currency (checked in the handler); writable for the $LUST burn.
+    #[account(mut)]
+    pub payment_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// Required for $LUST packs.
+    #[account(seeds = [LUST_SEED], bump = lust_config.bump)]
+    pub lust_config: Option<Box<Account<'info, LustConfig>>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub mint: MintAccounts<'info>,
     /// CHECK: address checked in `lookup_slot_hash`.
     pub slot_hashes: UncheckedAccount<'info>,
 }
 
-pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
+pub fn handle_open_pack<'info>(ctx: Context<'info, OpenPack<'info>>) -> Result<()> {
     let pending_key = ctx.accounts.pending_pack.key();
     if !ctx.accounts.pending_pack.sealed {
         seal(&mut ctx.accounts.pending_pack, &ctx.accounts.slot_hashes.to_account_info())?;
@@ -58,6 +63,10 @@ pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
 
     let pending = &ctx.accounts.pending_pack;
     let config = &ctx.accounts.config;
+    let lust = ctx.accounts.lust_config.as_deref().map(|b| &**b);
+    let (mint, vault) = mint_and_vault(pending.currency, config, lust)?;
+    require_keys_eq!(ctx.accounts.payment_mint.key(), mint, ErrorCode::WrongPaymentAccount);
+    require_keys_eq!(ctx.accounts.vault.key(), vault, ErrorCode::WrongVault);
     let expansion = &ctx.accounts.expansion;
     let table = &ctx.accounts.card_table;
     let pack_size = pending.pack_size;
@@ -79,26 +88,20 @@ pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
     let opener = ctx.accounts.opener.to_account_info();
     ctx.accounts.mint.mint_cards(config, expansion, table, &player, &opener, &card_ids)?;
 
-    // The price leaves the vault for the shop.
-    let price = pending.price;
-    if price > 0 {
-        let bump = [config.bump];
-        let seeds: &[&[u8]] = &[CONFIG_SEED, &bump];
-        transfer_checked(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.key(),
-                TransferChecked {
-                    from: ctx.accounts.vault.to_account_info(),
-                    mint: ctx.accounts.booty_mint.to_account_info(),
-                    to: ctx.accounts.booty_destination.to_account_info(),
-                    authority: ctx.accounts.config.to_account_info(),
-                },
-                &[seeds],
-            ),
-            price,
-            ctx.accounts.booty_mint.decimals,
-        )?;
-    }
+    // The price leaves the vault.
+    let (price, currency) = (pending.price, pending.currency);
+    pay_out(
+        &ctx.accounts.token_program.to_account_info(),
+        &ctx.accounts.vault.to_account_info(),
+        &ctx.accounts.payment_mint.to_account_info(),
+        ctx.accounts.payment_mint.decimals,
+        &ctx.accounts.config.to_account_info(),
+        config,
+        lust,
+        currency,
+        ctx.remaining_accounts,
+        price,
+    )?;
 
     // The opener gets the open fee; `close = player` then returns the rent and the unused retry pool to the player.
     let fees = pending.open_fee;
@@ -116,6 +119,6 @@ pub fn handle_open_pack(ctx: Context<OpenPack>) -> Result<()> {
     expansion.packs_sold = expansion.packs_sold.checked_add(1).ok_or(ErrorCode::Overflow)?;
     expansion.cards_minted = expansion.cards_minted.checked_add(n).ok_or(ErrorCode::Overflow)?;
 
-    emit_cpi!(PackMinted { expansion_id, order_id, player: player_key, tree, first_leaf_index: first_leaf, card_ids, price, seed });
+    emit_cpi!(PackMinted { expansion_id, order_id, player: player_key, tree, first_leaf_index: first_leaf, card_ids, currency, price, seed });
     Ok(())
 }

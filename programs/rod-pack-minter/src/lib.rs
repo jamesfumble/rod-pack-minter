@@ -63,8 +63,8 @@ pub mod rod_pack_minter {
     }
 
     // Admin: expansions
-    pub fn add_expansion(ctx: Context<AddExpansion>, params: ExpansionParams, price: u64) -> Result<()> {
-        instructions::expansion::handle_add_expansion(ctx, params, price)
+    pub fn add_expansion(ctx: Context<AddExpansion>, params: ExpansionParams, price_booty: u64, price_lust: u64) -> Result<()> {
+        instructions::expansion::handle_add_expansion(ctx, params, price_booty, price_lust)
     }
     pub fn update_expansion(ctx: Context<ExpansionAdmin>, expansion_id: u16, params: ExpansionParams) -> Result<()> {
         instructions::expansion::handle_update_expansion(ctx, expansion_id, params)
@@ -72,12 +72,19 @@ pub mod rod_pack_minter {
     pub fn set_price(
         ctx: Context<ExpansionAdmin>,
         expansion_id: u16,
-        price: u64,
-        discount_price: u64,
+        price_booty: u64,
+        price_lust: u64,
+        discount_percent: u8,
         discount_start: i64,
         discount_end: i64,
     ) -> Result<()> {
-        instructions::expansion::handle_set_price(ctx, expansion_id, price, discount_price, discount_start, discount_end)
+        instructions::expansion::handle_set_price(ctx, expansion_id, price_booty, price_lust, discount_percent, discount_start, discount_end)
+    }
+    pub fn set_sale_period(ctx: Context<ExpansionAdmin>, expansion_id: u16, sale_start: i64, sale_end: i64) -> Result<()> {
+        instructions::expansion::handle_set_sale_period(ctx, expansion_id, sale_start, sale_end)
+    }
+    pub fn set_lust_payment(ctx: Context<SetLustPayment>, split_bps: [u16; LUST_SPLITS]) -> Result<()> {
+        instructions::admin::handle_set_lust_payment(ctx, split_bps)
     }
     pub fn set_expansion_paused(ctx: Context<ExpansionAdmin>, expansion_id: u16, paused: bool) -> Result<()> {
         instructions::expansion::handle_set_expansion_paused(ctx, expansion_id, paused)
@@ -95,10 +102,10 @@ pub mod rod_pack_minter {
     }
 
     // Purchases
-    pub fn buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 16], max_price: u64) -> Result<()> {
-        instructions::buy_pack::handle_buy_pack(ctx, expansion_id, order_id, max_price)
+    pub fn buy_pack(ctx: Context<BuyPack>, expansion_id: u16, order_id: [u8; 16], currency: u8, max_price: u64) -> Result<()> {
+        instructions::buy_pack::handle_buy_pack(ctx, expansion_id, order_id, currency, max_price)
     }
-    pub fn open_pack(ctx: Context<OpenPack>) -> Result<()> {
+    pub fn open_pack<'info>(ctx: Context<'info, OpenPack<'info>>) -> Result<()> {
         instructions::open_pack::handle_open_pack(ctx)
     }
     pub fn seal_pack(ctx: Context<SealPack>) -> Result<()> {

@@ -34,7 +34,11 @@ residual risks that were accepted, and the rules the backend must follow.
   - `set_payment` waits for zero pending packs.
   - `set_destination` can repair a broken shop account at any time, and the vault is never allowed as the
     destination.
-  - Only plain mints are accepted (82 bytes, no Token-2022 extensions).
+  - Only plain mints are accepted (82 bytes, no Token-2022 extensions), for $BOOTY and $LUST.
+  - Two currencies, each with its own vault. A $LUST price is paid out to exactly the four configured destinations
+    (checked against `LustConfig`), with the remainder burned; the split cannot exceed 100%.
+  - Prices are mirrored from the shop catalog with Phantom-signed `set_price` / `set_sale_period`; the player's
+    `max_price` caps what they pay. Price 0 means not for sale in that currency.
 - **The player pays every fee.**
   - The PendingPack holds the player's deposit: `open_fee` for whoever opens (or the admin, for a refund) and a retry
     pool of `retry_fee x paid_retries` that pays each seal or redraw while it lasts.

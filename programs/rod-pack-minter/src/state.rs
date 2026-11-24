@@ -69,7 +69,7 @@ pub struct PendingPack {
     pub player: Pubkey,
     pub expansion_id: u16,
     pub order_id: [u8; 16],
-    /// $BOOTY held in the vault for this pack.
+    /// Raw units of the pack's currency (`currency`) held in that currency's vault.
     pub price: u64,
     pub pack_size: u8,
     /// Slot of the `buy_pack` transaction. The cards come from the hash of this slot, which does not exist until
@@ -95,6 +95,8 @@ pub struct PendingPack {
     pub retry_pool: u64,
     /// CURRENCY_BOOTY or CURRENCY_LUST: which vault holds `price` (raw units of that mint).
     pub currency: u8,
+    /// Spare bytes, so fields can be added later without breaking packs that are pending during an upgrade.
+    pub _reserved: [u8; 32],
 }
 
 /// $LUST payments. PDA ["lust"]. A $LUST price is split on opening: `split_bps[i]` to `destinations[i]` (team,
@@ -148,6 +150,8 @@ pub struct Expansion {
     pub packs_sold: u64,
     pub cards_minted: u64,
     pub bump: u8,
+    /// Spare bytes, so fields can be added later without breaking existing expansions.
+    pub _reserved: [u8; 32],
 }
 
 impl Expansion {

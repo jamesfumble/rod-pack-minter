@@ -78,8 +78,8 @@ export const cardsPda = (id) => pda([Buffer.from('cards'), u16le(id)]);
 export const mintAuthorityPda = () => pda([Buffer.from('mint_authority')]);
 export const lustConfigPda = () => pda([Buffer.from('lust')]);
 export const CURRENCY = { booty: 0, lust: 1 };
-/** Size of an Expansion account in the current layout (two prices + discount percent). */
-export const EXPANSION_LEN = 342;
+/** Size of an Expansion account in the current layout (two prices, discount percent, 32 spare bytes). */
+export const EXPANSION_LEN = 374;
 export const vaultPda = (mint) => pda([Buffer.from('vault'), new PublicKey(mint).toBuffer()]);
 export const pendingPda = (player, orderId) => pda([Buffer.from('pack'), new PublicKey(player).toBuffer(), Buffer.from(orderId)]);
 export const eventAuthorityPda = () => pda([Buffer.from('__event_authority')]);

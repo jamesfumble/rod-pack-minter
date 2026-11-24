@@ -42,8 +42,8 @@ pub struct OpenPack<'info> {
     /// The vault of the pack's currency (checked in the handler).
     #[account(mut)]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    /// Mint of the pack's currency (checked in the handler); writable for the $LUST burn.
-    #[account(mut)]
+    /// Mint of the pack's currency (checked in the handler). Clients mark it writable only for $LUST packs (the burn);
+    /// a $BOOTY open does not write-lock the mint.
     pub payment_mint: Box<InterfaceAccount<'info, Mint>>,
     /// Required for $LUST packs.
     #[account(seeds = [LUST_SEED], bump = lust_config.bump)]

@@ -81,6 +81,7 @@ pub fn handle_add_expansion(ctx: Context<AddExpansion>, params: ExpansionParams,
     e.packs_sold = 0;
     e.cards_minted = 0;
     e.bump = ctx.bumps.expansion;
+    e._reserved = [0u8; 32];
     apply(e, params);
     let t = &mut ctx.accounts.card_table;
     t.expansion_id = id;

@@ -697,6 +697,14 @@ impl Env {
             .to_account_metas(None),
         );
         ix.accounts.extend(self.payout_metas(currency));
+        if currency == CURRENCY_LUST {
+            // The $LUST burn needs the mint writable; a $BOOTY open leaves it read-only.
+            for m in ix.accounts.iter_mut() {
+                if m.pubkey == mint {
+                    m.is_writable = true;
+                }
+            }
+        }
         ix
     }
 

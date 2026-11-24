@@ -176,6 +176,7 @@ pub fn handle_set_lust_payment(ctx: Context<SetLustPayment>, split_bps: [u16; LU
     require!(split_bps.iter().map(|b| *b as u32).sum::<u32>() <= 10_000, ErrorCode::BadSplit);
     require_plain_mint(&ctx.accounts.lust_mint.to_account_info())?;
     let mint = ctx.accounts.lust_mint.key();
+    require_keys_neq!(mint, ctx.accounts.config.booty_mint, ErrorCode::BadCurrency);
     let l = &ctx.accounts.lust_config;
     require!(l.mint == Pubkey::default() || l.mint == mint || ctx.accounts.config.pending_packs == 0, ErrorCode::PacksPending);
     let vault = ctx.accounts.vault.key();

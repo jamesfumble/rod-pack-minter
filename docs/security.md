@@ -1,6 +1,6 @@
 # Security notes
 
-Three independent reviews were run (2026-11-23, 2026-11-24 twice). This file lists what the design guarantees, the
+Four independent reviews were run (2026-11-23, 2026-11-24 three times). This file lists what the design guarantees, the
 residual risks that were accepted, and the rules the backend must follow.
 
 ## Guarantees (enforced on chain)
@@ -29,13 +29,13 @@ residual risks that were accepted, and the rules the backend must follow.
 - **Only the admin picks a card** (`admin_mint`). Trees are created with the program PDA as creator and delegate,
   `public = false`. Nobody can mint into them outside the program.
 - **Money.**
-  - The vault can only pay a pack's recorded price, once: to the shop on open, or to the player's own account on an
-    admin refund.
+  - Each currency's vault can only pay a pack's recorded price, once: on open to the shop ($BOOTY) or to the four
+    $LUST destinations plus the burned rest ($LUST), or to the player's own account on an admin refund.
   - `set_payment` waits for zero pending packs.
   - `set_destination` can repair a broken shop account at any time, and the vault is never allowed as the
     destination.
   - Only plain mints are accepted (82 bytes, no Token-2022 extensions), for $BOOTY and $LUST.
-  - Two currencies, each with its own vault. A $LUST price is paid out to exactly the four configured destinations
+  - Two currencies, each with its own vault; $LUST and $BOOTY must be different mints. A $LUST price is paid out to exactly the four configured destinations
     (checked against `LustConfig`), with the remainder burned; the split cannot exceed 100%.
   - Prices are mirrored from the shop catalog with Phantom-signed `set_price` / `set_sale_period`; the player's
     `max_price` caps what they pay. Price 0 means not for sale in that currency.
@@ -62,8 +62,14 @@ residual risks that were accepted, and the rules the backend must follow.
 - **Block leader.** A colluding leader of the purchase slot could try block contents to influence that slot's hash.
 - **Forks.** If a purchase lands on a fork that loses, a player who saw that fork's hash could try to keep the
   purchase off the winning fork. The player cannot cause forks.
-- **$BOOTY freeze authority.** If the $BOOTY mint has a freeze authority, its holder could freeze the vault and
+- **Freeze authorities.** If the $BOOTY or $LUST mint has a freeze authority, its holder could freeze a vault and
   block opens and refunds. This is trust in the token issuer (the project itself).
+- **Payout accounts.** The shop account and the four $LUST destinations must accept transfers, or every `open_pack`
+  of that currency fails (until the admin replaces them with `set_destination` / `set_lust_payment`). Use only
+  token accounts the project controls (plain SPL Token accounts). The admin can also change the $LUST split or
+  destinations while packs are pending; they apply when those packs open (admin trust, like `set_destination`).
+- **Account layouts.** PendingPack and Expansion have 32 spare bytes for future fields. A layout change without
+  them breaks existing accounts (as happened on devnet before mainnet, where expansions 1 and 2 are unreadable).
 - **Admin key** (`CiAdmm...` on mainnet). It controls the program: prices, pause, admin mints, upgrades, refunds. It
   already controls the card collection.
 - **Approver key** (backend). Its holder can sell packs at the on-chain price, but cannot choose cards.
@@ -74,7 +80,9 @@ residual risks that were accepted, and the rules the backend must follow.
 - **Signing.** Co-sign `buy_pack` only for a transaction the server built, with the expected `max_price`. Send it
   yourself.
 - **Opening.** Send `open_pack` as soon as the purchase slot is complete (with a competitive priority fee), and retry
-  on failure. If opening must wait, send `seal_pack` within ~3 minutes. A pending pack that fails with
+  on failure. If an open fails for any reason other than the seal itself (e.g. a payout account rejects the
+  transfer), send `seal_pack` at once so the cards stay fixed while the cause is repaired. Mark the payment mint
+  writable only for $LUST packs. If opening must wait, send `seal_pack` within ~3 minutes. A pending pack that fails with
   `SlotHashUnavailable` gets `redraw_pack` (signed by the approver), then `open_pack` one slot later. The game client should also send `open_pack` itself if the backend has not opened the
   pack after a few seconds.
 - **Reading events.** Take PackBought / PackMinted only from:
@@ -83,6 +91,6 @@ residual risks that were accepted, and the rules the backend must follow.
   - whose first account is the `__event_authority` PDA, as signer;
   - whose data starts with the event-CPI tag and the event discriminator.
 
-  Never read events from `Program data:` logs. Match `(player, order_id)` to your order. Recompute the cards from
+  Never read events from `Program data:` logs. Match `(player, order_id)`, `currency` and `price` to your order. Recompute the cards from
   `seed` if in doubt.
 - **Trees.** Keep a standby tree: create one whenever `standby_tree` is empty (tree funder key).

@@ -51,6 +51,13 @@ collection owner `4jBVfRCTLvRL2NaMy4vf5XFyT21H9ryDBFbeeyBp5zFg`, player `9fUJVnU
 - One $BOOTY pack and one $LUST pack bought and opened. The $LUST pack paid out 100 / 100 / 450 / 250 $LUST, and
   100 $LUST was burned (supply 100,000 to 99,900). The vault is empty again.
 
+## Fourth review fixes (2026-11-24)
+
+- Program upgraded (644 KB): 32 spare bytes in PendingPack and Expansion, the mint is write-locked only for $LUST
+  opens, and $LUST and $BOOTY must be different mints.
+- Expansion 3 (layout without spare bytes) is paused. First Crush is **expansion 4**: 150 $BOOTY or 1,000 $LUST.
+- One pack of each currency was bought and opened.
+
 ## How it was set up (repeatable)
 
 Rehearse on Surfpool first (`surfpool start --network devnet --no-deploy -p 18899`, then the same commands with

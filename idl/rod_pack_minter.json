@@ -1011,9 +1011,9 @@
         {
           "name": "payment_mint",
           "docs": [
-            "Mint of the pack's currency (checked in the handler); writable for the $LUST burn."
-          ],
-          "writable": true
+            "Mint of the pack's currency (checked in the handler). Clients mark it writable only for $LUST packs (the burn);",
+            "a $BOOTY open does not write-lock the mint."
+          ]
         },
         {
           "name": "lust_config",
@@ -3186,6 +3186,18 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "_reserved",
+            "docs": [
+              "Spare bytes, so fields can be added later without breaking existing expansions."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -3559,7 +3571,7 @@
           {
             "name": "price",
             "docs": [
-              "$BOOTY held in the vault for this pack."
+              "Raw units of the pack's currency (`currency`) held in that currency's vault."
             ],
             "type": "u64"
           },
@@ -3664,6 +3676,18 @@
               "CURRENCY_BOOTY or CURRENCY_LUST: which vault holds `price` (raw units of that mint)."
             ],
             "type": "u8"
+          },
+          {
+            "name": "_reserved",
+            "docs": [
+              "Spare bytes, so fields can be added later without breaking packs that are pending during an upgrade."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }

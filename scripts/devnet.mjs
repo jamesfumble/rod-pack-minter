@@ -380,6 +380,8 @@ const commands = {
             payment_mint: pay.mint, lust_config: pay.lustConfig, token_program: TOKEN_PROGRAM_ID,
             slot_hashes: SLOT_HASHES, ...c.mintAccounts(tree, exp.collectionMint), ...c.eventAccounts() });
         for (const d of pay.payout) openIx.keys.push({ pubkey: new PublicKey(d), isSigner: false, isWritable: true });
+        // Only the $LUST burn needs the mint writable; a $BOOTY open leaves the mint read-only.
+        if (pending.currency === c.CURRENCY.lust) for (const m of openIx.keys) if (m.pubkey.equals(pay.mint)) m.isWritable = true;
         ixs.push(openIx);
         const lut = await ensureLookupTable(k.admin, ixs, [k.opener.publicKey, pending.player, pendingKey]);
         const before = await conn.getBalance(k.opener.publicKey);

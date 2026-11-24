@@ -408,6 +408,16 @@ fn a_full_size_card_table_fits_in_the_default_heap() {
     env.run_admin(ix).unwrap();
     let meta = env.buy_and_open(id, BOOTY).expect("open with a full card table");
     println!("open_pack (10 cards, 400-card table, max text) compute units: {}", meta.compute_units_consumed);
+    // The worst case for compute: the same pack paid in $LUST (four payouts and a burn).
+    let ix = env.expansion_admin_ix(
+        id,
+        rod_pack_minter::instruction::SetPrice { expansion_id: id, price_booty: 1, price_lust: 1_000, discount_percent: 0, discount_start: 0, discount_end: 0 }.data(),
+    );
+    env.run_admin(ix).unwrap();
+    let order = env.buy_lust(id, 1_000 * LUST).expect("buy with $LUST");
+    let meta = env.next_slot_and_open(&order, id).expect("open a 10-card $LUST pack with a full card table");
+    println!("open_pack (10 cards, 400-card table, max text, $LUST) compute units: {}", meta.compute_units_consumed);
+    assert!(meta.compute_units_consumed < 1_200_000);
 }
 
 #[test]

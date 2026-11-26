@@ -132,9 +132,10 @@ pub struct Expansion {
     #[max_len(MAX_URI_PREFIX_LEN)]
     pub uri_prefix: String,
     pub pack_size: u8,
-    /// Rarity weights for every slot except the last.
+    /// Rarity weights for every slot (the last one too, unless the guarantee applies).
     pub weights_regular: [u16; RARITY_COUNT],
-    /// Rarity weights for the last slot (the guarantee, e.g. Rare or better).
+    /// Rarity weights for the last slot when no earlier slot drew one of these rarities (the guarantee: at least one
+    /// card of them, e.g. Rare or better, per pack).
     pub weights_guaranteed: [u16; RARITY_COUNT],
     /// List prices in whole tokens, mirrored from the shop catalog. 0 = not sold for that currency.
     pub price_booty: u64,

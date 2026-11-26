@@ -55,7 +55,7 @@ fn purchase_then_open_and_the_player_pays_every_fee() {
     assert!(env.pending(&order).is_none(), "pending pack closed");
     let ev = pack_event(&meta);
     assert_eq!(ev.card_ids, expected_cards(&env, &slot_hash_of(purchase_slot), &order, purchase_slot, id));
-    assert!(ev.card_ids[5] >= 22, "guaranteed slot drew card {}", ev.card_ids[5]);
+    assert!(ev.card_ids.iter().any(|c| *c >= 22), "the pack has a Rare or better: {:?}", ev.card_ids);
     assert_eq!((ev.player, ev.tree, ev.first_leaf_index, ev.price), (player, tree, 0, 150 * BOOTY));
     let c = env.config();
     assert_eq!((c.packs_sold, c.cards_minted, c.pending_packs, c.reserved_leaves), (1, 6, 0, 0));

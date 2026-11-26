@@ -39,8 +39,11 @@ fn pick_rarity(roll: u64, weights: &[u64; RARITY_COUNT]) -> Option<u8> {
     None
 }
 
-/// Draws `pack_size` cards as (rarity, index within that rarity). Slots 0..pack_size-1 use `regular`, the last slot
-/// uses `guaranteed` (when it has any weight; otherwise `regular`). Returns None if a slot has no possible rarity.
+/// Draws `pack_size` cards as (rarity, index within that rarity). Every slot uses `regular`, except the last one when
+/// no earlier slot drew a rarity that `guaranteed` allows (weight > 0): then it uses `guaranteed`, so the pack always
+/// holds at least one card of those rarities (e.g. Rare or better). A pack that already has one draws its last card
+/// like the others. When `guaranteed` has no possible rarity (no cards), the last slot uses `regular`.
+/// Returns None if a slot has no possible rarity.
 pub fn draw_pack(
     seed: &[u8; 32],
     pack_size: u8,
@@ -56,7 +59,8 @@ pub fn draw_pack(
         let h = hashv(&[seed, &[slot]]).to_bytes();
         let roll_rarity = u64::from_le_bytes(h[0..8].try_into().unwrap());
         let roll_card = u64::from_le_bytes(h[8..16].try_into().unwrap());
-        let weights = if slot + 1 == pack_size && has_guarantee { &gua } else { &reg };
+        let needs_guarantee = slot + 1 == pack_size && has_guarantee && !out.iter().any(|(r, _)| guaranteed[*r as usize] > 0);
+        let weights = if needs_guarantee { &gua } else { &reg };
         let rarity = pick_rarity(roll_rarity, weights)?;
         let index = (roll_card % counts[rarity as usize] as u64) as u16;
         out.push((rarity, index));
@@ -77,11 +81,21 @@ mod tests {
         let n = 100_000u32;
         let mut regular = [0u32; 4];
         let mut last = [0u32; 4];
+        let mut guarded = [0u32; 4];   // the last card of packs whose first five were all Common
+        let mut guarded_packs = 0u32;
+        let mut rare_plus = 0u32;
         let mut per_card = [[0u32; 22]; 3];
         for i in 0..n {
             let seed = hashv(&[&i.to_le_bytes()]).to_bytes();
             let pack = draw_pack(&seed, 6, &REG, &GUA, &COUNTS).unwrap();
             assert_eq!(pack.len(), 6);
+            assert!(pack.iter().any(|(r, _)| *r > 0), "every pack has a Rare or better");
+            rare_plus += pack.iter().filter(|(r, _)| *r > 0).count() as u32;
+            let all_common = pack[..5].iter().all(|(r, _)| *r == 0);
+            if all_common {
+                guarded_packs += 1;
+                guarded[pack[5].0 as usize] += 1;
+            }
             for (slot, (r, idx)) in pack.iter().enumerate() {
                 assert!((*idx as usize) < 22);
                 if slot == 5 {
@@ -98,10 +112,17 @@ mod tests {
         assert!((pct(regular[0], total_regular) - 70.0).abs() < 0.5, "common {}", pct(regular[0], total_regular));
         assert!((pct(regular[1], total_regular) - 25.0).abs() < 0.5, "rare {}", pct(regular[1], total_regular));
         assert!((pct(regular[2], total_regular) - 5.0).abs() < 0.5, "epic {}", pct(regular[2], total_regular));
-        // the guaranteed slot is never Common: 83.3% Rare / 16.7% Epic
-        assert_eq!(last[0], 0);
-        assert!((pct(last[1], n as f64) - 83.333).abs() < 0.6, "last rare {}", pct(last[1], n as f64));
-        assert!((pct(last[2], n as f64) - 16.667).abs() < 0.6, "last epic {}", pct(last[2], n as f64));
+        // five Commons first happens in 0.7^5 = 16.8% of packs; only then is the last card guaranteed:
+        // never Common, 83.3% Rare / 16.7% Epic
+        assert!((pct(guarded_packs, n as f64) - 16.807).abs() < 0.5, "guarded packs {}", pct(guarded_packs, n as f64));
+        assert_eq!(guarded[0], 0);
+        let g = guarded_packs as f64;
+        assert!((pct(guarded[1], g) - 83.333).abs() < 1.5, "guarded rare {}", pct(guarded[1], g));
+        assert!((pct(guarded[2], g) - 16.667).abs() < 1.5, "guarded epic {}", pct(guarded[2], g));
+        // the last card overall: Common 70% x (1 - 0.168) = 58.2%, Rare or better 41.8%
+        assert!((pct(last[0], n as f64) - 58.235).abs() < 0.6, "last common {}", pct(last[0], n as f64));
+        // Rare or better per pack: 5 x 0.3 + 0.418 = 1.918
+        assert!((rare_plus as f64 / n as f64 - 1.918).abs() < 0.02, "rare+ per pack {}", rare_plus as f64 / n as f64);
         // every card of a rarity is roughly equally likely (within 10% of the mean)
         for r in 0..3 {
             let mean = per_card[r].iter().sum::<u32>() as f64 / 22.0;
@@ -129,6 +150,26 @@ mod tests {
                 assert_ne!(r, 1);
             }
         }
+    }
+
+    #[test]
+    fn a_pack_with_a_rare_already_draws_its_last_card_like_the_others() {
+        // find a seed whose first five slots include a Rare or better and whose last regular roll is Common
+        let reg = effective_weights(&REG, &COUNTS);
+        let mut found = false;
+        for i in 0..5000u32 {
+            let seed = hashv(&[&i.to_le_bytes()]).to_bytes();
+            let pack = draw_pack(&seed, 6, &REG, &GUA, &COUNTS).unwrap();
+            let h = hashv(&[&seed, &[5u8]]).to_bytes();
+            let regular_last = pick_rarity(u64::from_le_bytes(h[0..8].try_into().unwrap()), &reg).unwrap();
+            if pack[..5].iter().any(|(r, _)| *r > 0) {
+                assert_eq!(pack[5].0, regular_last, "seed {i}: the last card used the regular weights");
+                if regular_last == 0 {
+                    found = true;
+                }
+            }
+        }
+        assert!(found, "some pack with an earlier Rare ends on a Common");
     }
 
     #[test]

@@ -3116,7 +3116,7 @@
           {
             "name": "weights_regular",
             "docs": [
-              "Rarity weights for every slot except the last."
+              "Rarity weights for every slot (the last one too, unless the guarantee applies)."
             ],
             "type": {
               "array": [
@@ -3128,7 +3128,8 @@
           {
             "name": "weights_guaranteed",
             "docs": [
-              "Rarity weights for the last slot (the guarantee, e.g. Rare or better)."
+              "Rarity weights for the last slot when no earlier slot drew one of these rarities (the guarantee: at least one",
+              "card of them, e.g. Rare or better, per pack)."
             ],
             "type": {
               "array": [
